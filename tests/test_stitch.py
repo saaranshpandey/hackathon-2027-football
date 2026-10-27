@@ -75,3 +75,14 @@ def test_teams_never_mix():
     out = stitch(trk)
     assert (out.players[:, :11, 0] < 55).all()
     assert (out.players[:, 11:, 0] >= 55).all()
+
+
+def test_far_extra_slot_cannot_steal_freed_column():
+    trk = base()
+    trk.players[:, 11] = [100.0, 67.0]          # a persistent spurious home track far away
+    trk.players[110:, 12] = trk.players[110:, 3]  # player 3 breaks at 100, returns in slot 12 at 110
+    trk.players[100:, 3] = np.nan
+    out = stitch(trk)
+    c = column_of(out, trk.players[50, 3], 50)
+    assert np.nanmax(np.abs(out.players[:, c, 0] - trk.players[50, 3, 0])) < 20  # never jumps to x=100
+    np.testing.assert_allclose(out.players[110:, c], trk.players[110:, 12], atol=1e-5)
