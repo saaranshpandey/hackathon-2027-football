@@ -10,6 +10,10 @@ dependencies = [
     "kloppy==3.18.0",
     "scipy",
     "matplotlib",
+    "torch",
+    "torch-geometric",
+    "scikit-learn",
+    "tqdm",
 ]
 
 [dependency-groups]
