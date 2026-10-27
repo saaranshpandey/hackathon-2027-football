@@ -32,7 +32,7 @@ def load_model(device="cpu"):
 
     args = load_trial_args(TRIAL_DIR)
     model = build_model(args, device=device)
-    state = torch.load(resolve_model_path(TRIAL_DIR, WEIGHTS), map_location=device, weights_only=False)
+    state = torch.load(resolve_model_path(TRIAL_DIR, WEIGHTS), map_location=device, weights_only=True)
     model.load_state_dict(state)
     model.eval()
     return model
@@ -97,7 +97,8 @@ def p_home_pathcrf(trk, alive, device="cpu", model=None):
 
     with open(os.path.join(TRIAL_DIR, "args.json")) as f:
         args = json.load(f)
-    model = model or load_model(device)
+    if model is None:
+        model = load_model(device)
     _, _, micro_pred, _ = inference(model, to_table(trk, alive), use_crf=True, decode="indep",
                                     window_seconds=args["window_seconds"], correct_episode_lasts=True,
                                     evaluate=False)
