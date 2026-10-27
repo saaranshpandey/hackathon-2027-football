@@ -30,8 +30,13 @@ def _viterbi(emit, cost):
 
 def decode(p_dead, p_home, runs, cost_switch=8.0, cost_dead=4.0):
     """Label codes (T,) from P(dead) and P(home | alive); X outside the half-open runs."""
-    p_dead = np.clip(np.round(np.asarray(p_dead, dtype=np.float64), 3), 0.001, 0.999)
-    p_home = np.clip(np.round(np.asarray(p_home, dtype=np.float64), 3), 0.001, 0.999)
+    p_dead = np.asarray(p_dead, dtype=np.float64)
+    p_home = np.asarray(p_home, dtype=np.float64)
+    if not (np.isfinite(p_dead).all() and np.isfinite(p_home).all()):
+        # A NaN would silently turn the rest of its run into H (argmax over NaN is 0).
+        raise ValueError("decode needs finite probabilities; a producer emitted NaN or inf")
+    p_dead = np.clip(np.round(p_dead, 3), 0.001, 0.999)
+    p_home = np.clip(np.round(p_home, 3), 0.001, 0.999)
     emit = np.log(np.stack([(1 - p_dead) * p_home, (1 - p_dead) * (1 - p_home), p_dead], axis=1))
     cost = np.array([[0.0, cost_switch, cost_dead],
                      [cost_switch, 0.0, cost_dead],

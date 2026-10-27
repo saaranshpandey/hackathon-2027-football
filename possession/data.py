@@ -38,16 +38,21 @@ def parse_atd(raw_path, meta_path, n_frames, pitch):
 
 
 def load_match(game=GAME):
-    """Tactical ATD of the match, with period = half number on graded frames, else 0."""
+    """Tactical ATD of the match, with period = half number on graded frames, else 0.
+
+    period is recomputed from games.py on every load rather than cached, so an upstream
+    correction of the half boundaries can never meet a stale cache.
+    """
     path = os.path.join(CACHE_DIR, "atd_tactical.npz")
     if os.path.exists(path):
-        return load(path)
+        trk = load(path)
+    else:
+        meta_path, raw_path = require(["atd_meta", "atd_raw"], game)
+        trk = parse_atd(raw_path, meta_path, source_frames("tactical", game), GAMES[game]["pitch"])
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        save(trk, path)
 
-    meta_path, raw_path = require(["atd_meta", "atd_raw"], game)
-    trk = parse_atd(raw_path, meta_path, source_frames("tactical", game), GAMES[game]["pitch"])
+    trk.period = np.zeros(len(trk.ball), dtype=np.int8)
     for half, first, last in half_video_blocks(game):
         trk.period[first:last + 1] = half
-
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    save(trk, path)
     return trk

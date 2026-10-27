@@ -62,3 +62,20 @@ def test_save_load_roundtrip(tmp_path):
     np.testing.assert_array_equal(back.team, trk.team)
     np.testing.assert_array_equal(back.period, trk.period)
     assert back.pitch == trk.pitch
+
+
+def test_load_match_recomputes_period_from_games(tmp_path, monkeypatch):
+    import possession.data as data
+
+    n = 199319
+    stale = Tracking(ball=np.full((n, 2), np.nan, dtype=np.float32),
+                     players=np.full((n, 1, 2), np.nan, dtype=np.float32),
+                     team=np.array([0], dtype=np.int8),
+                     period=np.zeros(n, dtype=np.int8), pitch=(105.3, 68.0))
+    save(stale, str(tmp_path / "atd_tactical.npz"))
+    monkeypatch.setattr(data, "CACHE_DIR", str(tmp_path))
+
+    trk = data.load_match()
+    assert int((trk.period > 0).sum()) == 158857
+    assert trk.period[11185] == 1 and trk.period[90651] == 1 and trk.period[90652] == 0
+    assert trk.period[110808] == 2 and trk.period[190197] == 2 and trk.period[190198] == 0

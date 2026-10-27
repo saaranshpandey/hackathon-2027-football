@@ -56,3 +56,12 @@ def test_uninformative_keeps_state():
     p_dead, p_home = inputs()
     p_home[100:] = 0.5
     assert (decode(p_dead, p_home, [(0, T)]) == pm.H).all()
+
+
+def test_nan_input_rejected():
+    import pytest
+
+    p_dead, p_home = inputs()
+    p_home[50] = np.nan
+    with pytest.raises(ValueError):
+        decode(p_dead, p_home, [(0, T)])
