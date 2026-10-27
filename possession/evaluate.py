@@ -9,6 +9,7 @@ Scrambled matches (default) look like our match; --clean uses the original DFL t
 """
 
 import argparse
+import hashlib
 import os
 
 import numpy as np
@@ -26,8 +27,29 @@ from starter.baseline import smooth
 
 LABEL_SETS = {"original": 0, "controlled2": 50, "controlled3": 75}
 SIGNAL_DIR = os.path.join(DFL_DIR, "signals")
-# Bump when the code behind a signal changes, so stale cached signals are not reused.
-SIGNAL_VERSION = 1
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_P = os.path.join(_ROOT, "possession")
+_PATHCRF = os.path.join(_ROOT, "third_party", "pathcrf")
+_RULES = [os.path.join(_P, f) for f in ("tracking.py", "scramble.py", "deadball.py", "team.py")]
+_PATHCRF_CHAIN = [os.path.join(_P, f) for f in ("decode.py", "stitch.py", "pathcrf.py")] + [
+    os.path.join(_PATHCRF, "inference.py"), os.path.join(_PATHCRF, "datatools", "utils.py"),
+    os.path.join(_PATHCRF, "saved", "140", "model", "state_dict_best_acc.pt")]
+# Every file a cached signal depends on: a change to any of them gives a new cache key.
+SIGNAL_SOURCES = {
+    "A": _RULES,
+    "D": _RULES + _PATHCRF_CHAIN,
+    "DB": _RULES + _PATHCRF_CHAIN + [os.path.join(_P, "features.py"), os.path.join(_P, "deadball_model.py"),
+                                     os.path.join(_ROOT, "models", "deadball_hgb.joblib")],
+}
+
+
+def _fingerprint(paths):
+    digest = hashlib.sha256()
+    for path in paths:
+        with open(path, "rb") as f:
+            digest.update(f.read())
+    return digest.hexdigest()[:12]
 
 
 def _stoppages(codes, runs):
@@ -65,13 +87,18 @@ PREDICTORS = list(BASELINES) + list(SIGNALS)
 def signals(name, match, trk, clean=False):
     """(P(dead), P(home)) of a signal-based approach on one DFL match, cached on disk."""
     tag = "clean" if clean else "scrambled"
-    path = os.path.join(SIGNAL_DIR, "v{}_{}_{}_{}.npz".format(SIGNAL_VERSION, name, match, tag))
+    key = _fingerprint(SIGNAL_SOURCES[name])
+    path = os.path.join(SIGNAL_DIR, "{}_{}_{}_{}.npz".format(name, match, tag, key))
     if os.path.exists(path):
         with np.load(path) as f:
-            return f["p_dead"], f["p_home"]
+            p_dead, p_home = f["p_dead"], f["p_home"]
+        if len(p_dead) == len(p_home) == len(trk.period):
+            return p_dead, p_home
     p_dead, p_home = SIGNALS[name](trk)
     os.makedirs(SIGNAL_DIR, exist_ok=True)
-    np.savez(path, p_dead=p_dead, p_home=p_home)
+    with open(path + ".part", "wb") as f:  # write then rename: an interrupted run leaves no corrupt cache
+        np.savez(f, p_dead=p_dead, p_home=p_home)
+    os.replace(path + ".part", path)
     return p_dead, p_home
 
 
