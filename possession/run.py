@@ -13,6 +13,7 @@ import numpy as np
 
 from evaluation import possession_metrics as pm
 from games import GAME, half_video_blocks
+from possession.controlled import controlled_labels
 from possession.data import ROOT, load_match
 from possession.deadball import p_dead_rules
 from possession.pathcrf import approach_d, approach_db
@@ -31,12 +32,14 @@ APPROACHES = {
 }
 
 
-def predict(approach, device="cpu"):
+def predict(approach, device="cpu", post=0):
     trk = load_match()
     p_dead, p_home = APPROACHES[approach](trk, device)
     for half, first, _ in half_video_blocks(GAME):
         p_dead[first:KICKOFF[half]] = 0.999  # graded but before kickoff: the ball is not in play
-    return decode(p_dead, p_home, runs_from_period(trk.period)), trk
+    runs = runs_from_period(trk.period)
+    codes = decode(p_dead, p_home, runs)
+    return (controlled_labels(codes, runs, post) if post else codes), trk
 
 
 def main():
@@ -44,9 +47,11 @@ def main():
     parser.add_argument("--approach", choices=sorted(APPROACHES), default="A")
     parser.add_argument("--name", default=None, help="file name stem (default: the approach)")
     parser.add_argument("--device", default="cpu", help="torch device for approach D: cpu, mps or cuda")
+    parser.add_argument("--post", type=int, default=0,
+                        help="controlled-possession rule on the output: min frames for a change of team (0 = off)")
     args = parser.parse_args()
 
-    codes, trk = predict(args.approach, args.device)
+    codes, trk = predict(args.approach, args.device, args.post)
     path = os.path.join(ROOT, "submissions", "{}.csv".format(args.name or args.approach))
     write_submission(path, np.array(pm.LABELS)[codes])
 
