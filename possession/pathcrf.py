@@ -120,3 +120,20 @@ def approach_d(trk, device="cpu", model=None):
     p_dead = p_dead_rules(trk)
     alive = (decode(p_dead, p_home_nearest(trk), runs_from_period(trk.period)) != pm.D) & (trk.period > 0)
     return p_dead, p_home_pathcrf(stitch(trk), alive, device=device, model=model)
+
+
+def approach_db(trk, device="cpu", model=None, deadball=None):
+    """(P(dead), P(home | alive)) for approach DB: learned dead-ball model, PathCRF's team signal.
+
+    PathCRF's live-ball stretches come from decoding P(dead) alone (p_home = 0.5), so the weak
+    nearest-player signal no longer shapes them.
+    """
+    from evaluation import possession_metrics as pm
+    from possession.deadball_model import load, p_dead_model
+    from possession.decode import decode
+    from possession.stitch import stitch
+
+    p_dead = p_dead_model(trk, deadball if deadball is not None else load())
+    runs = runs_from_period(trk.period)
+    alive = (decode(p_dead, np.full(len(p_dead), 0.5), runs) != pm.D) & (trk.period > 0)
+    return p_dead, p_home_pathcrf(stitch(trk), alive, device=device, model=model)

@@ -15,7 +15,7 @@ from evaluation import possession_metrics as pm
 from games import GAME, half_video_blocks
 from possession.data import ROOT, load_match
 from possession.deadball import p_dead_rules
-from possession.pathcrf import approach_d
+from possession.pathcrf import approach_d, approach_db
 from possession.decode import decode
 from possession.team import p_home_nearest
 from possession.tracking import runs_from_period
@@ -27,6 +27,7 @@ KICKOFF = {1: KICKOFF_VIDEO_FRAMES["1st Half"], 2: KICKOFF_VIDEO_FRAMES["2nd Hal
 APPROACHES = {
     "A": lambda trk, device: (p_dead_rules(trk), p_home_nearest(trk)),
     "D": lambda trk, device: approach_d(trk, device=device),
+    "DB": lambda trk, device: approach_db(trk, device=device),
 }
 
 

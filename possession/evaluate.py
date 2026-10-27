@@ -13,17 +13,24 @@ from evaluation import possession_metrics as pm
 from possession.deadball import p_dead_rules
 from possession.decode import decode
 from possession.external import ALL_MATCHES, TEST, VAL, load_dfl
-from possession.pathcrf import approach_d
+from possession.pathcrf import approach_d, approach_db
 from possession.scramble import load_scrambled
 from possession.team import nearest_team_codes, p_home_nearest
 from possession.tracking import runs_from_period
 from starter.baseline import smooth
 
 
+def _stoppages(codes, runs):
+    return sum(1 for _, _, k in pm.segments(codes, runs) if k == pm.D)
+
+
 def score(gt, pred):
     result = pm.evaluate(gt, pred)
+    runs = pm.valid_runs(gt)
     return {"spell_f1": result["spell_f1_mean"], "macro_f1": result["macro_f1"],
-            "n_gt": result["n_gt_spells"], "n_pred": result["n_pred_spells"]}
+            "n_gt": result["n_gt_spells"], "n_pred": result["n_pred_spells"],
+            "dead_f1": result["alive_dead_f1"], "stops_gt": _stoppages(gt, runs),
+            "stops_pred": _stoppages(pm.fill_abstentions(pred, runs), runs)}
 
 
 def _baseline(window):
@@ -46,6 +53,7 @@ PREDICTORS = {
     "A": _approach_a,
     # PathCRF was trained on the 5 train matches: only its val/test rows are fair.
     "D": lambda trk: decode(*approach_d(trk), runs_from_period(trk.period)),
+    "DB": lambda trk: decode(*approach_db(trk), runs_from_period(trk.period)),
 }
 
 
@@ -63,18 +71,19 @@ def main():
             rows[name][match] = score(gt, PREDICTORS[name](trk))
 
     print("data: {}\n".format("clean DFL" if args.clean else "scrambled DFL"))
-    print("| predictor | match | spellF1 | macroF1 | n_gt | n_pred |")
-    print("|---|---|---|---|---|---|")
+    print("| predictor | match | spellF1 | macroF1 | dead-ball F1 | possessions pred/true | stoppages pred/true |")
+    print("|---|---|---|---|---|---|---|")
     for name in args.predictors:
         for match in args.matches:
             r = rows[name][match]
             role = "test" if match in TEST else "val" if match in VAL else "train"
-            print("| {} | {} ({}) | {:.4f} | {:.4f} | {} | {} |".format(
-                name, match, role, r["spell_f1"], r["macro_f1"], r["n_gt"], r["n_pred"]))
+            print("| {} | {} ({}) | {:.4f} | {:.4f} | {:.4f} | {}/{} | {}/{} |".format(
+                name, match, role, r["spell_f1"], r["macro_f1"], r["dead_f1"], r["n_pred"], r["n_gt"],
+                r["stops_pred"], r["stops_gt"]))
         for label, group in (("VAL+TEST", VAL + TEST), ("ALL", ALL_MATCHES)):
             if not set(group) <= set(args.matches):
                 continue
-            print("| {} | **mean {}** | {:.4f} | {:.4f} | | |".format(
+            print("| {} | **mean {}** | {:.4f} | {:.4f} | | | |".format(
                 name, label, np.mean([rows[name][m]["spell_f1"] for m in group]),
                 np.mean([rows[name][m]["macro_f1"] for m in group])))
 
