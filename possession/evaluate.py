@@ -13,6 +13,7 @@ from evaluation import possession_metrics as pm
 from possession.deadball import p_dead_rules
 from possession.decode import decode
 from possession.external import ALL_MATCHES, TEST, VAL, load_dfl
+from possession.pathcrf import approach_d
 from possession.scramble import load_scrambled
 from possession.team import nearest_team_codes, p_home_nearest
 from possession.tracking import runs_from_period
@@ -43,6 +44,8 @@ PREDICTORS = {
     "smooth50": _baseline(50),
     "smooth125": _baseline(125),
     "A": _approach_a,
+    # PathCRF was trained on the 5 train matches: only its val/test rows are fair.
+    "D": lambda trk: decode(*approach_d(trk), runs_from_period(trk.period)),
 }
 
 
@@ -50,10 +53,11 @@ def main():
     parser = argparse.ArgumentParser(description="Score predictors on DFL validation matches")
     parser.add_argument("--predictors", nargs="+", default=list(PREDICTORS))
     parser.add_argument("--clean", action="store_true", help="original DFL tracking, not scrambled")
+    parser.add_argument("--matches", nargs="+", default=ALL_MATCHES, choices=ALL_MATCHES)
     args = parser.parse_args()
 
     rows = {name: {} for name in args.predictors}
-    for match in ALL_MATCHES:
+    for match in args.matches:
         trk, gt = load_dfl(match) if args.clean else load_scrambled(match)
         for name in args.predictors:
             rows[name][match] = score(gt, PREDICTORS[name](trk))
@@ -62,12 +66,14 @@ def main():
     print("| predictor | match | spellF1 | macroF1 | n_gt | n_pred |")
     print("|---|---|---|---|---|---|")
     for name in args.predictors:
-        for match in ALL_MATCHES:
+        for match in args.matches:
             r = rows[name][match]
             role = "test" if match in TEST else "val" if match in VAL else "train"
             print("| {} | {} ({}) | {:.4f} | {:.4f} | {} | {} |".format(
                 name, match, role, r["spell_f1"], r["macro_f1"], r["n_gt"], r["n_pred"]))
         for label, group in (("VAL+TEST", VAL + TEST), ("ALL", ALL_MATCHES)):
+            if not set(group) <= set(args.matches):
+                continue
             print("| {} | **mean {}** | {:.4f} | {:.4f} | | |".format(
                 name, label, np.mean([rows[name][m]["spell_f1"] for m in group]),
                 np.mean([rows[name][m]["macro_f1"] for m in group])))

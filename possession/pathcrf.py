@@ -102,3 +102,20 @@ def p_home_pathcrf(trk, alive, device="cpu", model=None):
                                     window_seconds=args["window_seconds"], correct_episode_lasts=True,
                                     evaluate=False)
     return team_probability(micro_pred, len(trk.period))
+
+
+def approach_d(trk, device="cpu", model=None):
+    """(P(dead), P(home | alive)) for approach D: A's dead-ball rules, PathCRF's team signal.
+
+    PathCRF works on live-ball stretches; those come from decoding A's signals, so D needs no
+    ground truth. Tracks are stitched into 11+11 identity-continuous players first.
+    """
+    from evaluation import possession_metrics as pm
+    from possession.deadball import p_dead_rules
+    from possession.decode import decode
+    from possession.stitch import stitch
+    from possession.team import p_home_nearest
+
+    p_dead = p_dead_rules(trk)
+    alive = (decode(p_dead, p_home_nearest(trk), runs_from_period(trk.period)) != pm.D) & (trk.period > 0)
+    return p_dead, p_home_pathcrf(stitch(trk), alive, device=device, model=model)
