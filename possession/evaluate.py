@@ -1,23 +1,33 @@
 """Score predictors on the DFL validation matches with the organizers' metric code.
 
-    python -m possession.evaluate --predictors raw smooth25 smooth50 smooth125 A [--clean]
+    python -m possession.evaluate --predictors smooth50 A D DB --matches J03WQQ J03WR9 \\
+        [--labels original|controlled2|controlled3] [--post FRAMES] [--cost-switch C] [--cost-dead C] [--clean]
 
 Scrambled matches (default) look like our match; --clean uses the original DFL tracking.
+--labels picks the answer key: the DFL labels as they are, or with the controlled-possession rule applied.
+--post applies the same rule to the predictions (0 = off).
 """
 
 import argparse
+import os
 
 import numpy as np
 
 from evaluation import possession_metrics as pm
+from possession.controlled import controlled_labels
 from possession.deadball import p_dead_rules
 from possession.decode import decode
-from possession.external import ALL_MATCHES, TEST, VAL, load_dfl
+from possession.external import ALL_MATCHES, DFL_DIR, TEST, VAL, load_dfl
 from possession.pathcrf import approach_d, approach_db
 from possession.scramble import load_scrambled
 from possession.team import nearest_team_codes, p_home_nearest
 from possession.tracking import runs_from_period
 from starter.baseline import smooth
+
+LABEL_SETS = {"original": 0, "controlled2": 50, "controlled3": 75}
+SIGNAL_DIR = os.path.join(DFL_DIR, "signals")
+# Bump when the code behind a signal changes, so stale cached signals are not reused.
+SIGNAL_VERSION = 1
 
 
 def _stoppages(codes, runs):
@@ -41,36 +51,65 @@ def _baseline(window):
     return predict
 
 
-def _approach_a(trk):
-    return decode(p_dead_rules(trk), p_home_nearest(trk), runs_from_period(trk.period))
-
-
-PREDICTORS = {
-    "raw": _baseline(0),
-    "smooth25": _baseline(25),
-    "smooth50": _baseline(50),
-    "smooth125": _baseline(125),
-    "A": _approach_a,
+BASELINES = {"raw": _baseline(0), "smooth25": _baseline(25), "smooth50": _baseline(50),
+             "smooth125": _baseline(125)}
+SIGNALS = {
+    "A": lambda trk: (p_dead_rules(trk), p_home_nearest(trk)),
     # PathCRF was trained on the 5 train matches: only its val/test rows are fair.
-    "D": lambda trk: decode(*approach_d(trk), runs_from_period(trk.period)),
-    "DB": lambda trk: decode(*approach_db(trk), runs_from_period(trk.period)),
+    "D": approach_d,
+    "DB": approach_db,
 }
+PREDICTORS = list(BASELINES) + list(SIGNALS)
+
+
+def signals(name, match, trk, clean=False):
+    """(P(dead), P(home)) of a signal-based approach on one DFL match, cached on disk."""
+    tag = "clean" if clean else "scrambled"
+    path = os.path.join(SIGNAL_DIR, "v{}_{}_{}_{}.npz".format(SIGNAL_VERSION, name, match, tag))
+    if os.path.exists(path):
+        with np.load(path) as f:
+            return f["p_dead"], f["p_home"]
+    p_dead, p_home = SIGNALS[name](trk)
+    os.makedirs(SIGNAL_DIR, exist_ok=True)
+    np.savez(path, p_dead=p_dead, p_home=p_home)
+    return p_dead, p_home
+
+
+def predict(name, match, trk, clean=False, cost_switch=8.0, cost_dead=4.0, post=0):
+    runs = runs_from_period(trk.period)
+    if name in BASELINES:
+        codes = BASELINES[name](trk)
+    else:
+        codes = decode(*signals(name, match, trk, clean), runs, cost_switch=cost_switch, cost_dead=cost_dead)
+    return controlled_labels(codes, runs, post) if post else codes
+
+
+def answer_key(trk, gt, labels):
+    threshold = LABEL_SETS[labels]
+    return controlled_labels(gt, runs_from_period(trk.period), threshold) if threshold else gt
 
 
 def main():
     parser = argparse.ArgumentParser(description="Score predictors on DFL validation matches")
-    parser.add_argument("--predictors", nargs="+", default=list(PREDICTORS))
+    parser.add_argument("--predictors", nargs="+", default=PREDICTORS, choices=PREDICTORS)
     parser.add_argument("--clean", action="store_true", help="original DFL tracking, not scrambled")
-    parser.add_argument("--matches", nargs="+", default=ALL_MATCHES, choices=ALL_MATCHES)
+    parser.add_argument("--matches", nargs="+", default=VAL + TEST, choices=ALL_MATCHES)
+    parser.add_argument("--labels", default="original", choices=sorted(LABEL_SETS))
+    parser.add_argument("--post", type=int, default=0, help="apply the controlled rule to predictions (frames)")
+    parser.add_argument("--cost-switch", type=float, default=8.0)
+    parser.add_argument("--cost-dead", type=float, default=4.0)
     args = parser.parse_args()
 
     rows = {name: {} for name in args.predictors}
     for match in args.matches:
         trk, gt = load_dfl(match) if args.clean else load_scrambled(match)
+        gt = answer_key(trk, gt, args.labels)
         for name in args.predictors:
-            rows[name][match] = score(gt, PREDICTORS[name](trk))
+            rows[name][match] = score(gt, predict(name, match, trk, args.clean, args.cost_switch,
+                                                  args.cost_dead, args.post))
 
-    print("data: {}\n".format("clean DFL" if args.clean else "scrambled DFL"))
+    print("data: {} DFL · answer key: {} · post: {} · costs switch/dead: {}/{}\n".format(
+        "clean" if args.clean else "scrambled", args.labels, args.post, args.cost_switch, args.cost_dead))
     print("| predictor | match | spellF1 | macroF1 | dead-ball F1 | possessions pred/true | stoppages pred/true |")
     print("|---|---|---|---|---|---|---|")
     for name in args.predictors:
