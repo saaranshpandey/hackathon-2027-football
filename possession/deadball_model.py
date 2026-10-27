@@ -1,50 +1,56 @@
-"""P(ball is dead) per frame, learned with LightGBM from the scrambled DFL training matches.
+"""P(ball is dead) per frame: gradient-boosted trees learned from the scrambled DFL training matches.
 
-    python -m possession.deadball_model      # train on TRAIN, early-stop on VAL, save models/deadball_lgbm.txt
+    python -m possession.deadball_model      # train on TRAIN, pick rounds on VAL, save models/deadball_hgb.joblib
 
+scikit-learn's HistGradientBoostingClassifier (the LightGBM-style algorithm) is used rather than LightGBM
+itself: LightGBM loads Homebrew's OpenMP and PyTorch its own, and the two crash in one process on macOS.
 TEST is never touched here. The saved model is trained on public DFL data only.
 """
 
 import os
 
-import lightgbm as lgb
+import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import clone
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import log_loss
 
 from evaluation import possession_metrics as pm
 from possession.features import deadball_features
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(ROOT, "models", "deadball_lgbm.txt")
+MODEL_PATH = os.path.join(ROOT, "models", "deadball_hgb.joblib")
 SUBSAMPLE = 5
-PARAMS = {
-    "objective": "binary", "learning_rate": 0.05, "num_leaves": 31, "min_data_in_leaf": 200,
-    "feature_fraction": 0.8, "deterministic": True, "force_col_wise": True, "num_threads": 4,
-    "seed": 0, "verbose": -1,
-}
-MAX_ROUNDS = 2000
-EARLY_STOP = 50
+MAX_ROUNDS = 600
+BASE = HistGradientBoostingClassifier(learning_rate=0.05, max_iter=MAX_ROUNDS, max_leaf_nodes=31,
+                                      min_samples_leaf=200, max_features=0.8, early_stopping=False,
+                                      random_state=0)
 
 
 def fit(X_train, y_train, X_val, y_val):
-    train = lgb.Dataset(X_train, label=y_train)
-    val = lgb.Dataset(X_val, label=y_val, reference=train)
-    return lgb.train(PARAMS, train, num_boost_round=MAX_ROUNDS, valid_sets=[val],
-                     callbacks=[lgb.early_stopping(EARLY_STOP, verbose=False)])
+    """Fit MAX_ROUNDS rounds, keep the round count with the lowest validation log-loss, refit to it."""
+    full = clone(BASE).fit(X_train, y_train)
+    losses = [log_loss(y_val, p[:, 1], labels=[0, 1]) for p in full.staged_predict_proba(X_val)]
+    return clone(BASE).set_params(max_iter=int(np.argmin(losses)) + 1).fit(X_train, y_train)
 
 
-def save(booster, path):
+def predict(model, X):
+    return model.predict_proba(X)[:, 1].astype(np.float32)
+
+
+def save(model, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    booster.save_model(path, num_iteration=booster.best_iteration)
+    joblib.dump(model, path)
 
 
 def load(path=MODEL_PATH):
-    return lgb.Booster(model_file=path)
+    return joblib.load(path)
 
 
-def p_dead_model(trk, booster):
+def p_dead_model(trk, model):
     """P(dead) for every frame (frames outside a period get a value too; the decoder ignores them)."""
-    return booster.predict(deadball_features(trk)).astype(np.float32)
+    return predict(model, deadball_features(trk))
 
 
 def _rows(match_ids):
@@ -66,15 +72,19 @@ def train(train_ids, val_ids):
 
 
 def main():
+    from sklearn.inspection import permutation_importance
     from sklearn.metrics import roc_auc_score
 
     from possession.external import TRAIN, VAL
 
-    booster, (X_va, y_va) = train(TRAIN, VAL)
-    save(booster, MODEL_PATH)
-    print("rounds", booster.best_iteration, " val AUC %.4f" % roc_auc_score(y_va, booster.predict(X_va)))
-    gain = pd.Series(booster.feature_importance("gain"), index=booster.feature_name())
-    print("top features by gain:", (gain / gain.sum()).sort_values(ascending=False).head(10).round(3).to_dict())
+    model, (X_va, y_va) = train(TRAIN, VAL)
+    save(model, MODEL_PATH)
+    print("rounds", model.n_iter_, " val AUC %.4f" % roc_auc_score(y_va, predict(model, X_va)))
+    sample = np.arange(0, len(y_va), 10)
+    imp = permutation_importance(model, X_va.iloc[sample], y_va[sample], scoring="roc_auc", n_repeats=3,
+                                 random_state=0)
+    top = pd.Series(imp.importances_mean, index=X_va.columns).sort_values(ascending=False).head(8)
+    print("top features (AUC drop when shuffled):", top.round(4).to_dict())
 
 
 if __name__ == "__main__":

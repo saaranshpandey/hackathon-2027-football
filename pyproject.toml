@@ -14,7 +14,6 @@ dependencies = [
     "torch-geometric",
     "scikit-learn",
     "tqdm",
-    "lightgbm",
 ]
 
 [dependency-groups]
