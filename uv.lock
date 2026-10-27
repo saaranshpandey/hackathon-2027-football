@@ -781,10 +781,10 @@ dev = [
 requires-dist = [
     { name = "kloppy", specifier = "==3.18.0" },
     { name = "matplotlib" },
-    { name = "numpy" },
+    { name = "numpy", specifier = "==2.5.4" },
     { name = "pandas" },
     { name = "pyarrow" },
-    { name = "scikit-learn" },
+    { name = "scikit-learn", specifier = "==1.9.1" },
     { name = "scipy" },
     { name = "torch" },
     { name = "torch-geometric" },

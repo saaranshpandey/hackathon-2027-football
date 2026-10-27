@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "More than a Hack 2027, Phase 1: frame-level ball possession from tracking data"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "numpy",
+    "numpy==2.5.4",
     "pandas",
     "pyarrow",
     "kloppy==3.18.0",
@@ -12,7 +12,7 @@ dependencies = [
     "matplotlib",
     "torch",
     "torch-geometric",
-    "scikit-learn",
+    "scikit-learn==1.9.1",
     "tqdm",
 ]
 

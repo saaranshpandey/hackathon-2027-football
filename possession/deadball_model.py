@@ -8,12 +8,14 @@ TEST is never touched here. The saved model is trained on public DFL data only.
 """
 
 import os
+import warnings
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.exceptions import InconsistentVersionWarning
 from sklearn.metrics import log_loss
 
 from evaluation import possession_metrics as pm
@@ -45,7 +47,15 @@ def save(model, path):
 
 
 def load(path=MODEL_PATH):
-    return joblib.load(path)
+    """The saved model; fails loudly if it was saved by a different scikit-learn version."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", InconsistentVersionWarning)
+        try:
+            return joblib.load(path)
+        except InconsistentVersionWarning as exc:
+            raise RuntimeError("{} was saved with another scikit-learn version ({}). Install the pinned "
+                               "versions (uv sync) or retrain: python -m possession.deadball_model".format(
+                                   path, exc)) from exc
 
 
 def p_dead_model(trk, model):

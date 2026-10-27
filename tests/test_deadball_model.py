@@ -43,3 +43,18 @@ def test_missing_values_allowed():
     X_tr.iloc[::7, 0] = np.nan
     model = fit(X_tr, y_tr, X_va, y_va)
     assert not np.isnan(predict(model, X_va.assign(player_speed_mean=np.nan))).any()
+
+
+def test_load_refuses_model_from_other_sklearn_version(tmp_path, monkeypatch):
+    import pytest
+    import sklearn.base
+
+    X_tr, y_tr = synthetic(2000, 8)
+    X_va, y_va = synthetic(500, 9)
+    model = fit(X_tr, y_tr, X_va, y_va)
+    path = str(tmp_path / "old.joblib")
+    monkeypatch.setattr(sklearn.base, "__version__", "0.0.1")  # pretend it was saved by another version
+    save(model, path)
+    monkeypatch.undo()
+    with pytest.raises(RuntimeError, match="scikit-learn"):
+        load(path)
