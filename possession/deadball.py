@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from possession.scramble import _true_runs
+from possession.tracking import true_runs
+
 
 FPS = 25
 OUT_MARGIN_M = 0.5
@@ -46,7 +47,7 @@ def p_dead_rules(trk):
         ball_static = ~np.isnan(x) & (centred_mean(speeds(trk.ball.astype(np.float64)), 12) < STATIC_BALL_MS)
 
     ball_gap_long = np.zeros(len(x), dtype=bool)
-    for start, stop in zip(*_true_runs(np.isnan(x))):
+    for start, stop in zip(*true_runs(np.isnan(x))):
         if stop - start > LONG_GAP_FRAMES:
             ball_gap_long[start:stop] = True
 

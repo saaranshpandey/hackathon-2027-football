@@ -6,13 +6,18 @@ hidden players, identity swaps and a missing ball. Labels are never touched.
 """
 
 import json
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
 
-from possession.tracking import Tracking, runs_from_period
+from possession.tracking import Tracking, runs_from_period, true_runs
 
 CAP = 2500       # run lengths are histogrammed up to 100 s
+# Situations in which the tracking may lose the ball, from tracking only (exist for DFL and our match).
+LINE_BIT, CROWD_BIT, SLOW_BIT = 1, 2, 4
+LINE_M = 3.0     # ball within this of a pitch line, or outside it
+SLOW_MS = 2.0    # mean player speed over +/-1 s below this
 JUMP_M = 3.0     # a slot moving more than this in one frame has switched to someone else
 CROWD_M = 5.0    # players this close to the ball count as crowding it
 
@@ -25,6 +30,10 @@ class DefectStats:
     mean_visible: float
     jump_rate: float            # jumps > JUMP_M per pair of consecutive visible slot-frames
     slots_per_team: tuple
+    gap_hazard: list = None     # per situation: ball-gap starts / visible-ball frames
+    gap_start_share: list = None  # per situation: share of all ball-gap starts
+    gap_hist_line: np.ndarray = None   # gap lengths for gaps starting near a line
+    gap_hist_other: np.ndarray = None  # gap lengths for all other gaps
 
     def to_json(self, path):
         with open(path, "w") as f:
@@ -32,21 +41,40 @@ class DefectStats:
                        "ball_gap_hist": self.ball_gap_hist.tolist(),
                        "slot_life_hist": self.slot_life_hist.tolist(),
                        "mean_visible": self.mean_visible, "jump_rate": self.jump_rate,
-                       "slots_per_team": list(self.slots_per_team)}, f)
+                       "slots_per_team": list(self.slots_per_team),
+                       "gap_hazard": self.gap_hazard, "gap_start_share": self.gap_start_share,
+                       "gap_hist_line": None if self.gap_hist_line is None else self.gap_hist_line.tolist(),
+                       "gap_hist_other": None if self.gap_hist_other is None else self.gap_hist_other.tolist()}, f)
 
     @classmethod
     def from_json(cls, path):
         with open(path) as f:
             d = json.load(f)
+        hist = lambda k: None if d.get(k) is None else np.array(d[k])
         return cls(d["ball_missing_frac"], np.array(d["ball_gap_hist"]),
                    np.array(d["slot_life_hist"]), d["mean_visible"], d["jump_rate"],
-                   tuple(d["slots_per_team"]))
+                   tuple(d["slots_per_team"]), d.get("gap_hazard"), d.get("gap_start_share"),
+                   hist("gap_hist_line"), hist("gap_hist_other"))
 
 
-def _true_runs(mask):
-    """(starts, stops) of True runs in a 1-D bool array."""
-    edges = np.diff(np.concatenate(([0], mask.astype(np.int8), [0])))
-    return np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+def situations(trk):
+    """Per frame: LINE_BIT | CROWD_BIT | SLOW_BIT combination (0..7); -1 where the ball is missing or outside a period."""
+    from possession.deadball import centred_mean, speeds
+
+    length, width = trk.pitch
+    out = np.full(len(trk.period), -1, dtype=np.int8)
+    for a, b in runs_from_period(trk.period):
+        ball = trk.ball[a:b].astype(np.float64)
+        players = trk.players[a:b].astype(np.float64)
+        x, y = ball[:, 0], ball[:, 1]
+        with np.errstate(invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            near_line = np.minimum.reduce([x, length - x, y, width - y]) < LINE_M
+            crowd = (np.linalg.norm(players - ball[:, None, :], axis=2) < CROWD_M).sum(1) >= 2
+            slow = centred_mean(np.nanmean(speeds(players), axis=1), 25) < SLOW_MS
+        code = near_line * LINE_BIT + crowd * CROWD_BIT + slow * SLOW_BIT
+        out[a:b] = np.where(np.isnan(x), -1, code)
+    return out
 
 
 def _hist(lengths):
@@ -58,17 +86,25 @@ def measure(trk):
     """Aggregate defect statistics over frames inside a period."""
     gaps, lives = [], []
     missing = frames = visible = jumps = pairs = 0
+    sit = situations(trk)
+    starts_by = np.zeros(8)
+    seen_by = np.bincount(sit[sit >= 0], minlength=8).astype(float)
+    line_gaps, other_gaps = [], []
     for a, b in runs_from_period(trk.period):
         ball_missing = np.isnan(trk.ball[a:b, 0])
         missing += int(ball_missing.sum())
-        starts, stops = _true_runs(ball_missing)
+        starts, stops = true_runs(ball_missing)
         gaps.extend((stops - starts).tolist())
+        for g0, g1 in zip(starts + a, stops + a):
+            if g0 > a and sit[g0 - 1] >= 0:
+                starts_by[sit[g0 - 1]] += 1
+                (line_gaps if sit[g0 - 1] & LINE_BIT else other_gaps).append(g1 - g0)
 
         vis = ~np.isnan(trk.players[a:b, :, 0])
         visible += int(vis.sum())
         frames += b - a
         for s in range(vis.shape[1]):
-            starts, stops = _true_runs(vis[:, s])
+            starts, stops = true_runs(vis[:, s])
             lives.extend((stops - starts).tolist())
 
         both = vis[1:] & vis[:-1]
@@ -79,7 +115,10 @@ def measure(trk):
     return DefectStats(ball_missing_frac=missing / frames, ball_gap_hist=_hist(gaps),
                        slot_life_hist=_hist(lives), mean_visible=visible / frames,
                        jump_rate=jumps / pairs if pairs else 0.0,
-                       slots_per_team=tuple(int(c) for c in np.bincount(trk.team, minlength=2)))
+                       slots_per_team=tuple(int(c) for c in np.bincount(trk.team, minlength=2)),
+                       gap_hazard=np.divide(starts_by, seen_by, out=np.zeros(8), where=seen_by > 0).tolist(),
+                       gap_start_share=(starts_by / max(starts_by.sum(), 1)).tolist(),
+                       gap_hist_line=_hist(line_gaps), gap_hist_other=_hist(other_gaps))
 
 
 def _percentile(hist, q):
@@ -96,7 +135,11 @@ def summary(stats):
             "slot_life_p90": _percentile(stats.slot_life_hist, 90),
             "ball_gap_med": _percentile(stats.ball_gap_hist, 50),
             "ball_gap_p90": _percentile(stats.ball_gap_hist, 90),
-            "jump_rate": round(stats.jump_rate, 5)}
+            "jump_rate": round(stats.jump_rate, 5),
+            "gaps_from_line": None if stats.gap_start_share is None else
+            round(sum(v for c, v in enumerate(stats.gap_start_share) if c & LINE_BIT), 3),
+            "gaps_when_slow": None if stats.gap_start_share is None else
+            round(sum(v for c, v in enumerate(stats.gap_start_share) if c & SLOW_BIT), 3)}
 
 
 def _fragments(clean, stats, rng):
@@ -109,7 +152,7 @@ def _fragments(clean, stats, rng):
     frags = []
     for p in range(clean.players.shape[1]):
         for a, b in runs_from_period(clean.period):
-            starts, stops = _true_runs(~np.isnan(clean.players[a:b, p, 0]))
+            starts, stops = true_runs(~np.isnan(clean.players[a:b, p, 0]))
             for t, end in zip(starts + a, stops + a):
                 while t < end:
                     stop = min(t + max(1, int(rng.choice(len(life_p), p=life_p))), end)
@@ -166,15 +209,25 @@ def _remove_ball(clean, stats, rng):
 
     with np.errstate(invalid="ignore"):
         crowd = (np.linalg.norm(clean.players - clean.ball[:, None, :], axis=2) < CROWD_M).sum(1)
-    gap_p = stats.ball_gap_hist / stats.ball_gap_hist.sum()
+    base = 1.0 + crowd
+    sit = situations(clean)
+    if stats.gap_hazard is not None and sum(stats.gap_hazard) > 0:
+        # Start gaps in the situations where our tracking loses the ball, as often as it does.
+        base = np.where(sit >= 0, np.asarray(stats.gap_hazard)[np.maximum(sit, 0)], 0.0)
+    norm = lambda h: h / h.sum()
+    gap_all = norm(stats.ball_gap_hist)
+    gap_line = gap_all if stats.gap_hist_line is None or stats.gap_hist_line.sum() == 0 else norm(stats.gap_hist_line)
+    gap_other = gap_all if stats.gap_hist_other is None or stats.gap_hist_other.sum() == 0 else norm(stats.gap_hist_other)
 
     missing = int((np.isnan(ball[:, 0]) & in_period).sum())
     while missing < target:
-        weights = np.where(~np.isnan(ball[:, 0]) & in_period, 1.0 + crowd, 0.0)
+        weights = np.where(~np.isnan(ball[:, 0]) & in_period, base, 0.0)
         if weights.sum() == 0:
             break
         starts = rng.choice(len(ball), size=50, p=weights / weights.sum())
-        lengths = rng.choice(len(gap_p), size=50, p=gap_p)
+        line_len = rng.choice(len(gap_line), size=50, p=gap_line)
+        other_len = rng.choice(len(gap_other), size=50, p=gap_other)
+        lengths = np.where((sit[starts] >= 0) & ((sit[starts] & LINE_BIT) > 0), line_len, other_len)
         for t, length in zip(starts, lengths):
             if missing >= target:
                 break
@@ -229,11 +282,18 @@ def load_scrambled(match_id):
     from possession.external import ALL_MATCHES, DFL_DIR, load_dfl
     from possession.tracking import load, save
 
-    path = os.path.join(DFL_DIR, match_id + "_scrambled.npz")
+    import hashlib
+
+    defects = os.path.join(CACHE_DIR, "defects.json")
+    digest = hashlib.sha256()
+    for source in (defects, os.path.abspath(__file__)):  # rebuilt when the defects or this code change
+        with open(source, "rb") as f:
+            digest.update(f.read())
+    path = os.path.join(DFL_DIR, "{}_scrambled_{}.npz".format(match_id, digest.hexdigest()[:12]))
     clean, codes = load_dfl(match_id)
     if os.path.exists(path):
         return load(path), codes
-    stats = DefectStats.from_json(os.path.join(CACHE_DIR, "defects.json"))
+    stats = DefectStats.from_json(defects)
     trk = scramble(clean, stats, seed=2026 + ALL_MATCHES.index(match_id))
     save(trk, path)
     return trk, codes

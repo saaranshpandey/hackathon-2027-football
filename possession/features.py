@@ -10,8 +10,7 @@ import numpy as np
 import pandas as pd
 
 from possession.deadball import centred_mean, speeds
-from possession.scramble import _true_runs
-from possession.tracking import runs_from_period
+from possession.tracking import runs_from_period, true_runs
 
 SLOW_MS = 1.0
 NEAR_BALL_M = 5.0
@@ -39,7 +38,7 @@ def _gap_features(visible):
     run_len = np.zeros(n)
     since = np.where(visible, 0.0, np.nan)
     until = np.where(visible, 0.0, np.nan)
-    for start, stop in zip(*_true_runs(~visible)):
+    for start, stop in zip(*true_runs(~visible)):
         run_len[start:stop] = stop - start
         if start > 0:
             since[start:stop] = np.arange(1, stop - start + 1)

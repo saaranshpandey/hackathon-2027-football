@@ -31,7 +31,8 @@ SIGNAL_DIR = os.path.join(DFL_DIR, "signals")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _P = os.path.join(_ROOT, "possession")
 _PATHCRF = os.path.join(_ROOT, "third_party", "pathcrf")
-_RULES = [os.path.join(_P, f) for f in ("tracking.py", "scramble.py", "deadball.py", "team.py")]
+_RULES = [os.path.join(_P, f) for f in ("tracking.py", "scramble.py", "deadball.py", "team.py")] + [
+    os.path.join(_ROOT, "data", "cache", "defects.json")]
 _PATHCRF_CHAIN = [os.path.join(_P, f) for f in ("decode.py", "stitch.py", "pathcrf.py")] + [
     os.path.join(_PATHCRF, "inference.py"), os.path.join(_PATHCRF, "datatools", "utils.py"),
     os.path.join(_PATHCRF, "saved", "140", "model", "state_dict_best_acc.pt")]

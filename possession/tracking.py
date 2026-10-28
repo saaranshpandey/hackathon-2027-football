@@ -26,6 +26,12 @@ def runs_from_period(period):
     return [(int(a), int(b)) for a, b in zip(bounds[:-1], bounds[1:]) if period[a] != 0]
 
 
+def true_runs(mask):
+    """(starts, stops) of True runs in a 1-D bool array."""
+    edges = np.diff(np.concatenate(([0], mask.astype(np.int8), [0])))
+    return np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+
+
 def save(trk, path):
     np.savez(path, ball=trk.ball, players=trk.players, team=trk.team, period=trk.period,
              pitch=np.array(trk.pitch, dtype=np.float64))
