@@ -34,6 +34,8 @@ class DefectStats:
     gap_start_share: list = None  # per situation: share of all ball-gap starts
     gap_hist_line: np.ndarray = None   # gap lengths for gaps starting near a line
     gap_hist_other: np.ndarray = None  # gap lengths for all other gaps
+    missing_slow: float = None    # share of slow-play frames (in periods) with the ball missing
+    missing_moving: float = None  # same for moving play
 
     def to_json(self, path):
         with open(path, "w") as f:
@@ -44,7 +46,8 @@ class DefectStats:
                        "slots_per_team": list(self.slots_per_team),
                        "gap_hazard": self.gap_hazard, "gap_start_share": self.gap_start_share,
                        "gap_hist_line": None if self.gap_hist_line is None else self.gap_hist_line.tolist(),
-                       "gap_hist_other": None if self.gap_hist_other is None else self.gap_hist_other.tolist()}, f)
+                       "gap_hist_other": None if self.gap_hist_other is None else self.gap_hist_other.tolist(),
+                       "missing_slow": self.missing_slow, "missing_moving": self.missing_moving}, f)
 
     @classmethod
     def from_json(cls, path):
@@ -54,13 +57,23 @@ class DefectStats:
         return cls(d["ball_missing_frac"], np.array(d["ball_gap_hist"]),
                    np.array(d["slot_life_hist"]), d["mean_visible"], d["jump_rate"],
                    tuple(d["slots_per_team"]), d.get("gap_hazard"), d.get("gap_start_share"),
-                   hist("gap_hist_line"), hist("gap_hist_other"))
+                   hist("gap_hist_line"), hist("gap_hist_other"), d.get("missing_slow"), d.get("missing_moving"))
+
+
+def slow_mask(trk):
+    """True on in-period frames where the mean player speed over +/-1 s is below SLOW_MS (players only)."""
+    from possession.deadball import centred_mean, speeds
+
+    out = np.zeros(len(trk.period), dtype=bool)
+    for a, b in runs_from_period(trk.period):
+        with np.errstate(invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            out[a:b] = centred_mean(np.nanmean(speeds(trk.players[a:b].astype(np.float64)), axis=1), 25) < SLOW_MS
+    return out
 
 
 def situations(trk):
     """Per frame: LINE_BIT | CROWD_BIT | SLOW_BIT combination (0..7); -1 where the ball is missing or outside a period."""
-    from possession.deadball import centred_mean, speeds
-
     length, width = trk.pitch
     out = np.full(len(trk.period), -1, dtype=np.int8)
     for a, b in runs_from_period(trk.period):
@@ -71,10 +84,14 @@ def situations(trk):
             warnings.simplefilter("ignore", RuntimeWarning)
             near_line = np.minimum.reduce([x, length - x, y, width - y]) < LINE_M
             crowd = (np.linalg.norm(players - ball[:, None, :], axis=2) < CROWD_M).sum(1) >= 2
-            slow = centred_mean(np.nanmean(speeds(players), axis=1), 25) < SLOW_MS
+            slow = slow_mask(trk)[a:b]
         code = near_line * LINE_BIT + crowd * CROWD_BIT + slow * SLOW_BIT
         out[a:b] = np.where(np.isnan(x), -1, code)
     return out
+
+
+def _missing_share(trk, mask):
+    return float(np.isnan(trk.ball[mask, 0]).mean()) if mask.any() else 0.0
 
 
 def _hist(lengths):
@@ -87,6 +104,7 @@ def measure(trk):
     gaps, lives = [], []
     missing = frames = visible = jumps = pairs = 0
     sit = situations(trk)
+    slow = slow_mask(trk)
     starts_by = np.zeros(8)
     seen_by = np.bincount(sit[sit >= 0], minlength=8).astype(float)
     line_gaps, other_gaps = [], []
@@ -118,7 +136,8 @@ def measure(trk):
                        slots_per_team=tuple(int(c) for c in np.bincount(trk.team, minlength=2)),
                        gap_hazard=np.divide(starts_by, seen_by, out=np.zeros(8), where=seen_by > 0).tolist(),
                        gap_start_share=(starts_by / max(starts_by.sum(), 1)).tolist(),
-                       gap_hist_line=_hist(line_gaps), gap_hist_other=_hist(other_gaps))
+                       gap_hist_line=_hist(line_gaps), gap_hist_other=_hist(other_gaps),
+                       missing_slow=_missing_share(trk, slow), missing_moving=_missing_share(trk, ~slow & (trk.period > 0)))
 
 
 def _percentile(hist, q):
@@ -138,6 +157,8 @@ def summary(stats):
             "jump_rate": round(stats.jump_rate, 5),
             "gaps_from_line": None if stats.gap_start_share is None else
             round(sum(v for c, v in enumerate(stats.gap_start_share) if c & LINE_BIT), 3),
+            "missing_slow": None if stats.missing_slow is None else round(stats.missing_slow, 3),
+            "missing_moving": None if stats.missing_moving is None else round(stats.missing_moving, 3),
             "gaps_when_slow": None if stats.gap_start_share is None else
             round(sum(v for c, v in enumerate(stats.gap_start_share) if c & SLOW_BIT), 3)}
 
@@ -202,11 +223,6 @@ def _assign_slots(clean, frags, pos, slots_per_team):
 def _remove_ball(clean, stats, rng):
     ball = clean.ball.copy()
     in_period = clean.period > 0
-    target = stats.ball_missing_frac * in_period.sum()
-    run_end = np.zeros(len(ball), dtype=np.int64)
-    for a, b in runs_from_period(clean.period):
-        run_end[a:b] = b
-
     with np.errstate(invalid="ignore"):
         crowd = (np.linalg.norm(clean.players - clean.ball[:, None, :], axis=2) < CROWD_M).sum(1)
     base = 1.0 + crowd
@@ -219,21 +235,33 @@ def _remove_ball(clean, stats, rng):
     gap_line = gap_all if stats.gap_hist_line is None or stats.gap_hist_line.sum() == 0 else norm(stats.gap_hist_line)
     gap_other = gap_all if stats.gap_hist_other is None or stats.gap_hist_other.sum() == 0 else norm(stats.gap_hist_other)
 
-    missing = int((np.isnan(ball[:, 0]) & in_period).sum())
-    while missing < target:
-        weights = np.where(~np.isnan(ball[:, 0]) & in_period, base, 0.0)
-        if weights.sum() == 0:
-            break
-        starts = rng.choice(len(ball), size=50, p=weights / weights.sum())
-        line_len = rng.choice(len(gap_line), size=50, p=gap_line)
-        other_len = rng.choice(len(gap_other), size=50, p=gap_other)
-        lengths = np.where((sit[starts] >= 0) & ((sit[starts] & LINE_BIT) > 0), line_len, other_len)
-        for t, length in zip(starts, lengths):
-            if missing >= target:
-                break
-            stop = min(t + max(1, int(length)), run_end[t], t + int(np.ceil(target - missing)))
-            missing += int((~np.isnan(ball[t:stop, 0])).sum())
-            ball[t:stop] = np.nan
+    if stats.missing_slow is not None:
+        slow = slow_mask(clean)
+        groups = [(slow & in_period, stats.missing_slow), (~slow & in_period, stats.missing_moving)]
+    else:
+        groups = [(in_period, stats.ball_missing_frac)]
+    for mask, frac in groups:
+        target = frac * mask.sum()
+        seg_end = np.zeros(len(ball), dtype=np.int64)  # gaps stay inside one slow / moving stretch
+        for a, b in zip(*true_runs(mask)):
+            seg_end[a:b] = b
+        missing = int((np.isnan(ball[:, 0]) & mask).sum())
+        while missing < target:
+            weights = np.where(~np.isnan(ball[:, 0]) & mask, base, 0.0)
+            if weights.sum() == 0:
+                weights = np.where(~np.isnan(ball[:, 0]) & mask, 1.0, 0.0)
+                if weights.sum() == 0:
+                    break
+            starts = rng.choice(len(ball), size=50, p=weights / weights.sum())
+            line_len = rng.choice(len(gap_line), size=50, p=gap_line)
+            other_len = rng.choice(len(gap_other), size=50, p=gap_other)
+            lengths = np.where((sit[starts] >= 0) & ((sit[starts] & LINE_BIT) > 0), line_len, other_len)
+            for t, length in zip(starts, lengths):
+                if missing >= target:
+                    break
+                stop = min(t + max(1, int(length)), seg_end[t], t + int(np.ceil(target - missing)))
+                missing += int((~np.isnan(ball[t:stop, 0])).sum())
+                ball[t:stop] = np.nan
     return ball
 
 

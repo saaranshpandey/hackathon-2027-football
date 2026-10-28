@@ -130,3 +130,23 @@ def test_scramble_starts_gaps_in_hazard_situations(clean, stats):
     sit = situations(clean2)
     assert len(starts) > 0
     assert all(sit[t - 1] & LINE_BIT or sit[t] & LINE_BIT for t in starts)
+
+
+def test_scramble_matches_missing_rate_in_slow_and_moving_play(stats):
+    from possession.scramble import slow_mask
+
+    rng = np.random.default_rng(5)
+    n = 6000
+    players = np.zeros((n, 22, 2), dtype=np.float32)
+    start = rng.uniform([5, 5], [100, 63], size=(22, 2))
+    step = np.where((np.arange(n) // 1000) % 2 == 0, 0.01, 0.2)  # alternate 1000-frame slow / moving blocks
+    players[:] = start + np.cumsum(step)[:, None, None] * np.array([1.0, 0.0])
+    players[:, :, 0] = np.mod(players[:, :, 0], 100) + 2
+    clean = Tracking(ball=np.tile([52.0, 34.0], (n, 1)).astype(np.float32), players=players,
+                     team=np.array([0] * 11 + [1] * 11, np.int8), period=np.ones(n, np.int8), pitch=(105.0, 68.0))
+    s2 = DefectStats(**{**stats.__dict__, "missing_slow": 0.6, "missing_moving": 0.1})
+    out = scramble(clean, s2, seed=1)
+    slow = slow_mask(clean)
+    miss = np.isnan(out.ball[:, 0])
+    assert abs(miss[slow].mean() - 0.6) < 0.04
+    assert abs(miss[~slow].mean() - 0.1) < 0.04
