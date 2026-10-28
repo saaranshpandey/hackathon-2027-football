@@ -11,3 +11,6 @@ Not copied: data/, docs/, scripts/, applications/, notebooks, other checkpoints.
 Modifications:
 - inference.py `_downsample_possession`: `.to_numpy()` -> `.to_numpy(copy=True)` (twice). pandas 3 returns
   read-only arrays; the original assigns into them.
+
+Also copied: data/sportec_synced/*.parquet — DFL open-data events synchronised to tracking by the PathCRF
+authors (ELASTIC). Used only to locate German restarts (throw-ins, corners, goal kicks, free kicks).
