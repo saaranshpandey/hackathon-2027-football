@@ -35,7 +35,7 @@ def dfl_restarts(match_id, trk):
     from possession.tracking import runs_from_period
 
     events = pd.read_parquet(os.path.join(SYNCED_DIR, match_id + ".parquet"))
-    events = events[events["spadl_type"].isin(DFL_TYPES)]
+    events = events[events["spadl_type"].isin(DFL_TYPES)].dropna(subset=["timestamp"])
     starts = {p: a for p, (a, _) in enumerate(runs_from_period(trk.period), start=1)}
     minutes, seconds = events["timestamp"].str.split(":", expand=True).astype(float).T.values
     frames = np.round((minutes * 60 + seconds) * FPS).astype(np.int64)

@@ -18,6 +18,9 @@ CAP = 2500       # run lengths are histogrammed up to 100 s
 LINE_BIT, CROWD_BIT, SLOW_BIT = 1, 2, 4
 LINE_M = 3.0     # ball within this of a pitch line, or outside it
 SLOW_MS = 2.0    # mean player speed over +/-1 s below this
+# A gap may run past the end of its slow/moving stretch by up to this many frames (uniform), so the ball does
+# not reappear exactly when play speeds up or slows down -- our tracking shows no such alignment.
+SPILL_MAX = 75
 JUMP_M = 3.0     # a slot moving more than this in one frame has switched to someone else
 CROWD_M = 5.0    # players this close to the ball count as crowding it
 
@@ -232,23 +235,24 @@ def _remove_ball(clean, stats, rng):
     gap_line = gap_all if stats.gap_hist_line is None or stats.gap_hist_line.sum() == 0 else norm(stats.gap_hist_line)
     gap_other = gap_all if stats.gap_hist_other is None or stats.gap_hist_other.sum() == 0 else norm(stats.gap_hist_other)
 
-    if stats.missing_slow is not None:
+    if stats.missing_slow is not None and stats.missing_moving is not None:
         slow = slow_mask(clean)
         groups = [(slow & in_period, stats.missing_slow), (~slow & in_period, stats.missing_moving)]
     else:
         groups = [(in_period, stats.ball_missing_frac)]
+    period_end = np.zeros(len(ball), dtype=np.int64)
+    for a, b in runs_from_period(clean.period):
+        period_end[a:b] = b
     for mask, frac in groups:
         target = frac * mask.sum()
-        seg_end = np.zeros(len(ball), dtype=np.int64)  # gaps stay inside one slow / moving stretch
+        seg_end = np.zeros(len(ball), dtype=np.int64)  # end of the slow / moving stretch a gap starts in
         for a, b in zip(*true_runs(mask)):
             seg_end[a:b] = b
         missing = int((np.isnan(ball[:, 0]) & mask).sum())
         while missing < target:
             weights = np.where(~np.isnan(ball[:, 0]) & mask, base, 0.0)
             if weights.sum() == 0:
-                weights = np.where(~np.isnan(ball[:, 0]) & mask, 1.0, 0.0)
-                if weights.sum() == 0:
-                    break
+                break
             starts = rng.choice(len(ball), size=50, p=weights / weights.sum())
             line_len = rng.choice(len(gap_line), size=50, p=gap_line)
             other_len = rng.choice(len(gap_other), size=50, p=gap_other)
@@ -256,8 +260,9 @@ def _remove_ball(clean, stats, rng):
             for t, length in zip(starts, lengths):
                 if missing >= target:
                     break
-                stop = min(t + max(1, int(length)), seg_end[t], t + int(np.ceil(target - missing)))
-                missing += int((~np.isnan(ball[t:stop, 0])).sum())
+                spill = int(rng.integers(0, SPILL_MAX + 1)) if SPILL_MAX else 0
+                stop = min(t + max(1, int(length)), seg_end[t] + spill, period_end[t])
+                missing += int((~np.isnan(ball[t:stop, 0]) & mask[t:stop]).sum())
                 ball[t:stop] = np.nan
     return ball
 
