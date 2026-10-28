@@ -225,11 +225,8 @@ def _remove_ball(clean, stats, rng):
     in_period = clean.period > 0
     with np.errstate(invalid="ignore"):
         crowd = (np.linalg.norm(clean.players - clean.ball[:, None, :], axis=2) < CROWD_M).sum(1)
-    base = 1.0 + crowd
+    base = 1.0 + crowd  # crowd weighting keeps the share of gaps starting near a line close to ours
     sit = situations(clean)
-    if stats.gap_hazard is not None and sum(stats.gap_hazard) > 0:
-        # Start gaps in the situations where our tracking loses the ball, as often as it does.
-        base = np.where(sit >= 0, np.asarray(stats.gap_hazard)[np.maximum(sit, 0)], 0.0)
     norm = lambda h: h / h.sum()
     gap_all = norm(stats.ball_gap_hist)
     gap_line = gap_all if stats.gap_hist_line is None or stats.gap_hist_line.sum() == 0 else norm(stats.gap_hist_line)

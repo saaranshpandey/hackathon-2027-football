@@ -116,22 +116,6 @@ def test_measure_hazard_follows_where_gaps_start():
     assert hazard[[c for c in range(8) if not c & LINE_BIT]].max() == 0
 
 
-def test_scramble_starts_gaps_in_hazard_situations(clean, stats):
-    from possession.scramble import LINE_BIT, situations
-
-    hazard = [1.0 if c & LINE_BIT else 0.0 for c in range(8)]
-    clean2 = Tracking(ball=clean.ball.copy(), players=clean.players, team=clean.team,
-                      period=clean.period, pitch=clean.pitch)
-    clean2.ball[::50] = [104.5, 30.0]           # the ball touches the line now and then
-    s2 = DefectStats(**{**stats.__dict__, "gap_hazard": hazard,
-                        "gap_hist_line": stats.ball_gap_hist, "gap_hist_other": stats.ball_gap_hist})
-    out = scramble(clean2, s2, seed=3)
-    starts = np.flatnonzero(np.isnan(out.ball[1:, 0]) & ~np.isnan(out.ball[:-1, 0])) + 1
-    sit = situations(clean2)
-    assert len(starts) > 0
-    assert all(sit[t - 1] & LINE_BIT or sit[t] & LINE_BIT for t in starts)
-
-
 def test_scramble_matches_missing_rate_in_slow_and_moving_play(stats):
     from possession.scramble import slow_mask
 
