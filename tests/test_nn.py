@@ -57,3 +57,23 @@ def test_approach_c_refuses_mismatched_feature_columns():
     bundle["columns"] = cols
     p_dead, p_home = approach_c(trk, bundle)
     assert len(p_dead) == len(p_home) == len(trk.period)
+
+
+def test_upsample_interpolates_between_steps():
+    from possession.nn import _upsample
+
+    np.testing.assert_allclose(_upsample(np.array([0.0, 1.0]), 10), [0, .2, .4, .6, .8, 1, 1, 1, 1, 1])
+
+
+def test_speed_not_taken_across_period_edge():
+    trk = make([20, 30], [70, 80], n=60)
+    trk.period[:10] = 0
+    trk.players[:10, :, 0] = 104.0  # positions just before the period, far away
+    f = nn_features(trk)
+    assert f["home_speed"].iloc[10:].max() < 1.0
+
+
+def test_orientation_rotates_y_too():
+    trk = make([75, 85], [25, 35])  # home defends the right goal -> rotated 180 degrees
+    trk.players[:, :2, 1] = 10.0
+    np.testing.assert_allclose(nn_features(trk)["home_cy"].iloc[5], 68.0 - 10.0)

@@ -65,7 +65,7 @@ def mirror(trk):
 
 def nn_features(trk):
     """(T, F) float32 table: dead-ball features + per-team summaries, x oriented so home attacks right."""
-    length, _ = trk.pitch
+    length, width = trk.pitch
     base = deadball_features(trk)
     cols = {}
     with warnings.catch_warnings(), np.errstate(invalid="ignore"):
@@ -74,9 +74,12 @@ def nn_features(trk):
         ball = trk.ball.astype(np.float64).copy()
         for a, b in runs_from_period(trk.period):
             if np.nanmean(players[a:b, trk.team == 0, 0]) > np.nanmean(players[a:b, trk.team == 1, 0]):
-                players[a:b, :, 0] = length - players[a:b, :, 0]
-                ball[a:b, 0] = length - ball[a:b, 0]
-        speed = speeds(players)
+                # teams changed ends: rotate the pitch 180 degrees so home always attacks right
+                players[a:b, :, 0], players[a:b, :, 1] = length - players[a:b, :, 0], width - players[a:b, :, 1]
+                ball[a:b, 0], ball[a:b, 1] = length - ball[a:b, 0], width - ball[a:b, 1]
+        speed = np.full(players.shape[:2], np.nan)
+        for a, b in runs_from_period(trk.period):  # never difference across a period edge
+            speed[a:b] = speeds(players[a:b])
         dist = np.linalg.norm(players - ball[:, None, :], axis=2)
         for team, name in ((0, "home"), (1, "away")):
             p, sp, d = players[:, trk.team == team], speed[:, trk.team == team], dist[:, trk.team == team]
@@ -104,6 +107,12 @@ def _sequences(trk, gt):
         home = np.where(g == pm.H, 1.0, np.where(g == pm.A, 0.0, np.nan)).astype(np.float32)
         out.append((feats[idx].T, (g == pm.D).astype(np.float32), home))
     return out
+
+
+def _upsample(prob, n):
+    """5 fps outputs (step k computed at frame STEP*k) -> n frames, linearly interpolated (no hold-forward lag)."""
+    steps = np.arange(len(prob)) * STEP
+    return np.interp(np.arange(n), steps, prob).astype(np.float32)
 
 
 def _standardise(x, mean, std):
@@ -207,8 +216,8 @@ def approach_c(trk, bundle=None):
         for a, b in runs_from_period(trk.period):
             x = _standardise(feats[a:b:STEP].T, bundle["mean"], bundle["std"])
             prob = torch.sigmoid(net(torch.tensor(x[None]))).numpy()[0]
-            p_dead[a:b] = np.repeat(prob[0], STEP)[:b - a]
-            p_home[a:b] = np.repeat(prob[1], STEP)[:b - a]
+            p_dead[a:b] = _upsample(prob[0], b - a)
+            p_home[a:b] = _upsample(prob[1], b - a)
     return p_dead, p_home
 
 
