@@ -137,3 +137,24 @@ def approach_db(trk, device="cpu", model=None, deadball=None):
     runs = runs_from_period(trk.period)
     alive = (decode(p_dead, np.full(len(p_dead), 0.5), runs) != pm.D) & (trk.period > 0)
     return p_dead, p_home_pathcrf(stitch(trk), alive, device=device, model=model)
+
+
+def approach_c_dead(trk, device="cpu", model=None):
+    """(P(dead), P(home | alive)): the TCN's dead-ball head, PathCRF's team signal (live stretches from the TCN)."""
+    from evaluation import possession_metrics as pm
+    from possession.decode import decode
+    from possession.nn import approach_c
+    from possession.stitch import stitch
+
+    p_dead, _ = approach_c(trk)
+    alive = (decode(p_dead, np.full(len(p_dead), 0.5), runs_from_period(trk.period)) != pm.D) & (trk.period > 0)
+    return p_dead, p_home_pathcrf(stitch(trk), alive, device=device, model=model)
+
+
+def approach_dbc(trk, device="cpu", model=None):
+    """Average of DB (dead-ball model + PathCRF) and C (TCN), per frame, for both P(dead) and P(home)."""
+    from possession.nn import approach_c
+
+    db_dead, db_home = approach_db(trk, device=device, model=model)
+    c_dead, c_home = approach_c(trk)
+    return (db_dead + c_dead) / 2, (db_home + c_home) / 2

@@ -16,7 +16,7 @@ from games import GAME, half_video_blocks
 from possession.controlled import controlled_labels
 from possession.data import ROOT, load_match
 from possession.deadball import p_dead_rules
-from possession.pathcrf import approach_d, approach_db
+from possession.pathcrf import approach_d, approach_db, approach_dbc
 from possession.decode import decode
 from possession.team import p_home_nearest
 from possession.tracking import runs_from_period
@@ -29,6 +29,7 @@ APPROACHES = {
     "A": lambda trk, device: (p_dead_rules(trk), p_home_nearest(trk)),
     "D": lambda trk, device: approach_d(trk, device=device),
     "DB": lambda trk, device: approach_db(trk, device=device),
+    "DBC": lambda trk, device: approach_dbc(trk, device=device),
 }
 
 

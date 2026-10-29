@@ -19,7 +19,8 @@ from possession.controlled import controlled_labels
 from possession.deadball import p_dead_rules
 from possession.decode import decode
 from possession.external import ALL_MATCHES, DFL_DIR, TEST, VAL, load_dfl
-from possession.pathcrf import approach_d, approach_db
+from possession.nn import approach_c
+from possession.pathcrf import approach_c_dead, approach_d, approach_db
 from possession.scramble import load_scrambled
 from possession.team import nearest_team_codes, p_home_nearest
 from possession.tracking import runs_from_period
@@ -43,6 +44,9 @@ SIGNAL_SOURCES = {
     "DB": _RULES + _PATHCRF_CHAIN + [os.path.join(_P, "features.py"), os.path.join(_P, "deadball_model.py"),
                                      os.path.join(_ROOT, "models", "deadball_hgb.joblib")],
 }
+_TCN = _RULES + [os.path.join(_P, f) for f in ("features.py", "nn.py")] + [os.path.join(_ROOT, "models", "tcn.pt")]
+SIGNAL_SOURCES["C"] = _TCN
+SIGNAL_SOURCES["C_dead"] = _TCN + _PATHCRF_CHAIN
 
 
 def _fingerprint(paths):
@@ -81,6 +85,8 @@ SIGNALS = {
     # PathCRF was trained on the 5 train matches: only its val/test rows are fair.
     "D": approach_d,
     "DB": approach_db,
+    "C": approach_c,
+    "C_dead": approach_c_dead,
 }
 PREDICTORS = list(BASELINES) + list(SIGNALS)
 
