@@ -198,7 +198,10 @@ def approach_c(trk, bundle=None):
     net = TCN(len(bundle["mean"]))
     net.load_state_dict(bundle["state"])
     net.eval()
-    feats = nn_features(trk).to_numpy(np.float32)
+    table = nn_features(trk)
+    if list(table.columns) != list(bundle["columns"]):
+        raise ValueError("feature columns differ from the ones the TCN was trained on; retrain: python -m possession.nn")
+    feats = table.to_numpy(np.float32)
     p_dead, p_home = np.full(len(trk.period), 0.5, np.float32), np.full(len(trk.period), 0.5, np.float32)
     with torch.no_grad():
         for a, b in runs_from_period(trk.period):

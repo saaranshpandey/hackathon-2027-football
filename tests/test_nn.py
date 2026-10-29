@@ -40,3 +40,20 @@ def test_tcn_keeps_length_and_receptive_field():
     reach = receptive_steps()
     assert diff[150 - reach:150 + reach + 1].sum() > 0
     assert diff[:150 - reach].sum() == 0 and diff[150 + reach + 1:].sum() == 0
+
+
+def test_approach_c_refuses_mismatched_feature_columns():
+    import pytest
+
+    from possession.nn import approach_c
+
+    trk = make([20, 30], [70, 80])
+    cols = list(nn_features(trk).columns)
+    net = TCN(len(cols))
+    bundle = {"state": net.state_dict(), "mean": np.zeros(len(cols)), "std": np.ones(len(cols)),
+              "columns": cols[::-1]}  # same count, different order
+    with pytest.raises(ValueError, match="columns"):
+        approach_c(trk, bundle)
+    bundle["columns"] = cols
+    p_dead, p_home = approach_c(trk, bundle)
+    assert len(p_dead) == len(p_home) == len(trk.period)
