@@ -19,6 +19,8 @@ from possession.deadball import p_dead_rules
 from possession.pathcrf import approach_d, approach_db, approach_dbc
 from possession.decode import decode
 from possession.team import p_home_nearest
+from possession.transformer import approach_t, approach_dbt
+from possession.hybrid import approach_t_dbc
 from possession.tracking import runs_from_period
 from starter.baseline import write_submission
 from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
@@ -30,6 +32,9 @@ APPROACHES = {
     "D": lambda trk, device: approach_d(trk, device=device),
     "DB": lambda trk, device: approach_db(trk, device=device),
     "DBC": lambda trk, device: approach_dbc(trk, device=device),
+    "T": lambda trk, device: approach_t(trk, device=device),
+    "DBT": lambda trk, device: approach_dbt(trk, device=device),
+    "T_DBC": lambda trk, device: approach_t_dbc(trk, device=device),
 }
 
 
@@ -47,7 +52,7 @@ def main():
     parser = argparse.ArgumentParser(description="Write a submission file")
     parser.add_argument("--approach", choices=sorted(APPROACHES), default="A")
     parser.add_argument("--name", default=None, help="file name stem (default: the approach)")
-    parser.add_argument("--device", default="cpu", help="torch device for approach D: cpu, mps or cuda")
+    parser.add_argument("--device", default="cpu", help="torch device: cpu, mps or cuda (use cuda for T/DBT)")
     parser.add_argument("--post", type=int, default=0,
                         help="controlled-possession rule on the output: min frames for a change of team (0 = off)")
     args = parser.parse_args()

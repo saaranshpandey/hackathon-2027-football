@@ -20,6 +20,7 @@ from possession.deadball import p_dead_rules
 from possession.decode import decode
 from possession.external import ALL_MATCHES, DFL_DIR, TEST, VAL, load_dfl
 from possession.nn import approach_c
+from possession.transformer import approach_t
 from possession.pathcrf import approach_c_dead, approach_d, approach_db
 from possession.scramble import load_scrambled
 from possession.team import nearest_team_codes, p_home_nearest
@@ -47,6 +48,7 @@ SIGNAL_SOURCES = {
 _TCN = _RULES + [os.path.join(_P, f) for f in ("features.py", "nn.py")] + [os.path.join(_ROOT, "models", "tcn.pt")]
 SIGNAL_SOURCES["C"] = _TCN
 SIGNAL_SOURCES["C_dead"] = _TCN + _PATHCRF_CHAIN
+SIGNAL_SOURCES["T"] = _RULES + [os.path.join(_P, f) for f in ("features.py", "nn.py", "transformer.py")] + [os.path.join(_ROOT, "models", "transformer.pt")]
 
 
 def _fingerprint(paths):
@@ -87,12 +89,20 @@ SIGNALS = {
     "DB": approach_db,
     "C": approach_c,
     "C_dead": approach_c_dead,
+    "T": approach_t,
 }
-PREDICTORS = list(BASELINES) + list(SIGNALS)
+PREDICTORS = list(BASELINES) + list(SIGNALS) + ["DBC", "DBT", "T_DBC"]
 
 
 def signals(name, match, trk, clean=False):
     """(P(dead), P(home)) of a signal-based approach on one DFL match, cached on disk."""
+    if name == "T_DBC":
+        from possession.hybrid import combine
+        return combine(*(signals(n, match, trk, clean) for n in ("T", "DB", "C")))
+    if name in ("DBC", "DBT"):
+        db = signals("DB", match, trk, clean)
+        other = signals("C" if name == "DBC" else "T", match, trk, clean)
+        return tuple((a + b) / 2 for a, b in zip(db, other))
     tag = "clean" if clean else "scrambled"
     key = _fingerprint(SIGNAL_SOURCES[name])
     path = os.path.join(SIGNAL_DIR, "{}_{}_{}_{}.npz".format(name, match, tag, key))
@@ -125,7 +135,7 @@ def answer_key(trk, gt, labels):
 
 def main():
     parser = argparse.ArgumentParser(description="Score predictors on DFL validation matches")
-    parser.add_argument("--predictors", nargs="+", default=PREDICTORS, choices=PREDICTORS)
+    parser.add_argument("--predictors", nargs="+", default=[n for n in PREDICTORS if n not in ("T", "DBT", "DBC", "T_DBC")], choices=PREDICTORS)
     parser.add_argument("--clean", action="store_true", help="original DFL tracking, not scrambled")
     parser.add_argument("--matches", nargs="+", default=VAL + TEST, choices=ALL_MATCHES)
     parser.add_argument("--labels", default="original", choices=sorted(LABEL_SETS))
