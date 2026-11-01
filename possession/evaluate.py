@@ -91,11 +91,16 @@ SIGNALS = {
     "C_dead": approach_c_dead,
     "T": approach_t,
 }
-PREDICTORS = list(BASELINES) + list(SIGNALS) + ["DBC", "DBT", "T_DBC"]
+PREDICTORS = list(BASELINES) + list(SIGNALS) + ["DBC", "DBT", "T_DBC", "T_DBC_B"]
 
 
 def signals(name, match, trk, clean=False):
     """(P(dead), P(home)) of a signal-based approach on one DFL match, cached on disk."""
+    if name == 'T_DBC_B':
+        from possession.boundary import adjust
+        dead,home=signals('T_DBC',match,trk,clean)
+        dead,home,_=adjust(trk,dead,home)
+        return dead,home
     if name == "T_DBC":
         from possession.hybrid import combine
         return combine(*(signals(n, match, trk, clean) for n in ("T", "DB", "C")))
@@ -135,7 +140,7 @@ def answer_key(trk, gt, labels):
 
 def main():
     parser = argparse.ArgumentParser(description="Score predictors on DFL validation matches")
-    parser.add_argument("--predictors", nargs="+", default=[n for n in PREDICTORS if n not in ("T", "DBT", "DBC", "T_DBC")], choices=PREDICTORS)
+    parser.add_argument("--predictors", nargs="+", default=[n for n in PREDICTORS if n not in ("T", "DBT", "DBC", "T_DBC", "T_DBC_B")], choices=PREDICTORS)
     parser.add_argument("--clean", action="store_true", help="original DFL tracking, not scrambled")
     parser.add_argument("--matches", nargs="+", default=VAL + TEST, choices=ALL_MATCHES)
     parser.add_argument("--labels", default="original", choices=sorted(LABEL_SETS))

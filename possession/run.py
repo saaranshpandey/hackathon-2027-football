@@ -21,6 +21,7 @@ from possession.decode import decode
 from possession.team import p_home_nearest
 from possession.transformer import approach_t, approach_dbt
 from possession.hybrid import approach_t_dbc
+from possession.boundary import approach_t_dbc_b
 from possession.tracking import runs_from_period
 from starter.baseline import write_submission
 from starter.load_smart_tagging import KICKOFF_VIDEO_FRAMES
@@ -35,6 +36,7 @@ APPROACHES = {
     "T": lambda trk, device: approach_t(trk, device=device),
     "DBT": lambda trk, device: approach_dbt(trk, device=device),
     "T_DBC": lambda trk, device: approach_t_dbc(trk, device=device),
+    "T_DBC_B": lambda trk, device: approach_t_dbc_b(trk, device=device),
 }
 
 
