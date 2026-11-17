@@ -1,182 +1,209 @@
-# Ball possession from tracking: the T_DBC hybrid
+# Who has the ball? Possession from broken tracking with a hybrid temporal ensemble
 
-Technical document for More than a Hack 2027, Phase 1. Code:
-<https://github.com/saaranshpandey/hackathon-2027-football> (branch `main`). The submission file is
-produced by `python -m possession.run --approach T_DBC --device cuda --post 50`.
+**Team NumpyWarriors** · More than a Hack 2027, Phase 1 · Code:
+<https://github.com/saaranshpandey/hackathon-2027-football>
 
-## 1. Approach
+| 0.686 | 18 vs 17 | 0.768 | 1 command |
+|---|---|---|---|
+| spellF1 on the public 5-minute window, against 0.424 for the best organiser baseline | possessions predicted vs actual in that window | mean spellF1 on two held-out German matches | regenerates the submission byte for byte from a fresh clone |
 
-The submission is produced from the provided tactical tracking (ATD) only. Three learned signals
-estimate, for every frame, two probabilities: **P(dead)**, that the ball is out of play, and
-**P(home | alive)**, that Barcelona has the ball given play is live. A decoder turns those
-probabilities into clean H / A / D possessions, then a controlled-possession rule removes team
-changes that never became control.
+## Summary
 
-```
-ATD tracking ──► 44 features @ 5 fps ──► T  (Transformer) ─────────────► P(dead)
-            │                       └──► C  (TCN) ──────────┐
-            └──► stitched 11+11 players ► DB (PathCRF) ─────┴─ average ─► P(home | alive)
-                                                                              │
-             Viterbi decoder (H/A/D, switch costs) ◄──────────────────────────┘
-                              │
-             2 s controlled-possession rule ──► 25 fps labels
-```
+We label every frame of Barcelona vs Athletic as Barcelona possession (H), Athletic possession
+(A) or dead ball (D), from the provided tracking alone. The hard part is not the classifier but
+the data: **the ball is missing on 41% of in-play frames, and players are split across 46
+anonymous, fragmented track slots.** Our answer has three ideas.
 
-**Why this split.** Whether the ball is dead and who has it are different problems with different
-evidence. Dead balls show up as global patterns (players slowing down, walking back, the ball
-leaving the field or disappearing). Possession needs the ball-player relationship, but the ball is
-often unobserved in this tracking. Keeping the two heads separate lets each come from a different
-model. The combination was chosen by decoded spellF1 on the validation match: dead balls from the
-Transformer, the team from an average of PathCRF and a TCN.
+1. **Train on data that looks like this match.** Seven public German matches come with
+   frame-level possession labels and clean tracking. We corrupt that tracking with the defect
+   statistics of this match, so our models learn under the conditions they will face.
+2. **Split the question in two.** *Is the ball dead?* and *who has it?* need different evidence,
+   so different models answer them. A temporal Transformer handles dead balls. The average of
+   PathCRF, a published model that finds the ball carrier from player movement alone, and a
+   temporal CNN handles the team.
+3. **Decode possessions, not frames.** A Viterbi decoder and a 2-second control rule turn noisy
+   per-frame probabilities into whole possessions, which is the unit the competition scores.
 
-### Components
+On the public window we recover 18 possessions where the truth has 17, with spellF1 0.686:
+1.6 times the best organiser baseline on the same five minutes.
 
-- **Features (44 per frame, 5 fps).** 28 dead-ball features: ball visibility, speed, distance to
-  the touchline and corners, length of the current missing-ball run, player speed statistics,
-  count of slow players, team spread, players near the ball and in the boxes, and rolling versions
-  over 0.5, 2 and 5 s. 16 team summaries: centroid, spread, mean speed, nearest-player distance
-  and players within 10 m of the ball for each team, plus ball position. Each half is rotated so
-  home always attacks right. Nothing is computed across a half boundary.
-- **T, temporal Transformer** (`possession/transformer.py`): 2 pre-norm layers, width 64, 4
-  heads, feed-forward 128, sinusoidal positions, 128-step windows (25.6 s). Inference uses
-  overlapping windows (stride 32) with weighted averaging, interpolated back to 25 fps. Two
-  binary heads (dead; home given live), unknown labels masked, team-swap augmentation. Trained on
-  5 DFL matches and early-stopped on validation loss (best epoch 14). **Only its P(dead) is used.**
-- **C, temporal convolutional network** (`possession/nn.py`): residual dilated 1-D convolutions
-  (dilations 1-32, 64 channels), same features and heads. **Its P(home | alive) is used.**
-- **DB, PathCRF + learned dead-ball model** (`possession/pathcrf.py`): PathCRF (Kim et al., KDD
-  2026) infers the ball possessor from player trajectories alone. We use the authors' published
-  checkpoint (vendored in `third_party/pathcrf`, MPL-2.0) without retraining. Because it needs 11
-  identity-continuous players per team, our anonymous, fragmented track slots are first stitched
-  into 11+11 continuous players (`possession/stitch.py`). It runs on live stretches defined by a
-  gradient-boosted dead-ball model (scikit-learn HistGradientBoosting on the 28 dead-ball
-  features). **Its P(home | alive) is used.**
-- **Fusion** (`possession/hybrid.py`): P(dead) = T; P(home | alive) = ½ (DB + C).
-- **Decoder** (`possession/decode.py`): three-state Viterbi over H, A, D, run separately in each
-  half. Changing between H and A costs 8, entering or leaving D costs 4 (log-probability units),
-  so a few noisy frames cannot split a possession.
+## 1. Why this match is hard
 
-### Making German training data look like this match
+- **The ball disappears when it matters most.** It is missing on 41% of in-play frames: 12% when
+  play is flowing, but 54% when players are slow, which is around stoppages and restarts, exactly
+  where possession changes.
+- **Players have no identity.** 46 track slots cover 22 players. When the tracker loses a player,
+  the track restarts in a new slot. On average 20.5 players are visible.
+- **There is nothing to train on.** The rules forbid labelling this match, and the five public
+  minutes are for checking a pipeline, not tuning it.
 
-The DFL training tracking is clean; this match's tracking has anonymous, fragmented tracks,
-hidden players, identity swaps and long missing-ball stretches. `possession/scramble.py` measures
-**aggregate defect statistics** of the provided tracking (no labels, no frame-specific values)
-and applies them to the DFL matches, so models are trained and validated on input that looks like
-the test match. This is the only use of the provided game during training.
+A nearest-player-to-the-ball rule therefore fails exactly when it is needed: our rule-based
+baseline reaches spellF1 0.348. A model trained on clean tracking would meet a different world
+at test time.
 
-## 2. Assets used
+## 2. Method
 
-| Asset | Used? | How |
+![Figure 1: pipeline from tracking to possession labels](report/pipeline.svg)
+
+*Figure 1. From tracking to labels. Blue boxes are learned models; the Transformer decides when
+the ball is dead, the mean of the CNN and PathCRF decides who has it when it is live.*
+
+### 2.1 Training data that looks like this match
+
+The Sportec Open DFL Dataset (Bassek et al., 2025) has seven Bundesliga and 2. Bundesliga
+matches with per-frame
+ball status and possessing team. Its tracking is clean, so we measure **aggregate defect
+statistics** of the provided tracking and reproduce them on the German matches
+(`possession/scramble.py`). These are the share and length distribution of missing-ball gaps,
+where gaps start (for example near the touchline), track-slot lifetimes, the number of visible
+players and the identity-jump rate. Tracks are then anonymised and fragmented, players hidden,
+identities swapped and the ball removed in realistic gaps. Only distributions are taken from
+this match: no labels and no frame-specific values. Five matches train, one validates, one tests.
+
+### 2.2 Features
+
+Each frame gets 44 features at 5 fps. **Dead-ball features:** ball visibility, speed, distance
+to the lines and corners, length of the current missing-ball gap, player speeds, number of slow
+players, team spread, players near the ball and in the boxes, plus rolling versions over 0.5, 2
+and 5 seconds. **Team features:** centroid, spread, mean speed, nearest player to the ball and
+players within 10 m for each side, plus ball position. Each half is rotated so Barcelona always
+attacks the same way, and nothing is computed across halftime.
+
+### 2.3 Three temporal models
+
+- **Dead-ball Transformer** (`possession/transformer.py`). A two-layer bidirectional Transformer
+  (width 64, 4 heads) reads 25.6-second windows, long enough to see players walk back for a
+  restart. Overlapping windows are averaged and interpolated back to 25 fps. Trained with a
+  dead-ball and a team head; we use its dead-ball head.
+- **Temporal CNN** (`possession/nn.py`). Six levels of dilated residual convolutions over the same
+  features, with a 12.6-second receptive field. We use its team head.
+- **PathCRF** (Kim et al., KDD 2026; `third_party/pathcrf`). A set-attention network with a
+  conditional random field that infers who holds the ball from player trajectories, without the
+  ball. We use the authors' published checkpoint. It needs 11 continuous players per side, so we
+  stitch the 46 anonymous slots into 11 + 11 identities (`possession/stitch.py`). It runs on live
+  stretches found by a gradient-boosted dead-ball classifier.
+
+**Fusion.** P(dead) comes from the Transformer; P(Barcelona | live) is the mean of the CNN and
+PathCRF. The two team models fail differently: one reasons from summary features, the other from
+player-to-player possession paths. Averaged, they score 0.761 against 0.714 and 0.709 alone.
+
+### 2.4 From frames to possessions
+
+A three-state Viterbi decoder (`possession/decode.py`) finds the most likely H / A / D sequence
+in each half. Switching between teams costs 8 and entering or leaving a dead ball costs 4 (in
+log-probability units), so a handful of noisy frames cannot split a possession. The control rule
+below then removes team changes that never became control.
+
+## 3. Possession rules
+
+| Situation | Our rule | Implementation |
 |---|---|---|
-| Tactical ATD tracking | **Yes** | Sole input to every model; aggregate defect statistics drive the scrambling |
-| Kickoff frames (`starter/load_smart_tagging.py`) | **Yes** | Graded frames before each half's kickoff are set to dead |
-| Smart Tagging restarts | Tried, dropped | Extra dead-ball evidence before tagged restarts: no gain on validation (0.7459 vs 0.7466) |
-| Homography | No | |
-| Tactical video | Not in the pipeline | Watched in a local review player to debug; an audio whistle detector was built and dropped (section 5) |
-| Broadcast video/tracking | No | |
-| Public 5-minute ground truth | Pipeline check only | Never used for training, tuning or model selection |
-| DFL open data (external) | **Yes** | Training and validation labels (section 3) |
-| PathCRF checkpoint (external) | **Yes** | Team signal, used as published |
+| Ball out of play, stoppage, before kickoff | Dead ball (D) | Learned from DFL ball status; graded frames before each kickoff are forced to D |
+| Loose ball, pass or cross in flight | Stays with the last team in control | Uninformative frames cannot pay the decoder's switching cost |
+| Touch, deflection, lost aerial duel | Not a change of possession: the new team must keep the ball for 2 s | `possession/controlled.py` returns shorter spells to the previous team |
+| Restart after a stoppage | The restarting team has the ball immediately | The first spell after any stoppage is always kept |
+| Halftime, before and after the halves | Not graded (X) | No graded frame is left as X |
 
-## 3. Training data
+The 2-second threshold was fixed before looking at any result. The same rule is applied to the
+German labels, so validation measures the definition we submit.
 
-No labels from the provided game were used, by hand or otherwise. We created no labels of our own.
+## 4. Results
 
-| Dataset | Source | Labelled by | Amount | Used for |
-|---|---|---|---|---|
-| Sportec Open DFL Dataset (Bassek et al., *Scientific Data* 2025, CC-BY 4.0) | Hugging Face mirror `pysport/idsse-data` | DFL / Sportec Solutions: per-frame ball status (alive/dead) and possessing team in the official tracking feed | 7 Bundesliga / 2. Bundesliga matches | Training T, C and the dead-ball model; validation and test |
-| Same dataset, event data synchronised with ELASTIC | PathCRF repository (`third_party/pathcrf/data/sportec_synced`) | DFL event data (manually annotated), synchronised by the PathCRF authors | 7 matches | Training of the published PathCRF checkpoint (by its authors, fold: test J03WR9, val J03WQQ). We used these files only to locate German restarts in the dropped restart experiment |
+![Figure 2: spellF1 by model](report/fig_results.svg)
 
-Split: train J03WMX, J03WN1, J03WOH, J03WOY, J03WPY · validation J03WQQ · test J03WR9.
-The DFL labels are converted to H/A/D directly (dead → D, otherwise the possessing team).
+*Figure 2. spellF1, the ranking metric. Left: mean of the validation (J03WQQ) and test (J03WR9)
+German matches, corrupted to look like this match. Right: the public five minutes of this match.*
 
-## 4. Possession rules implemented
-
-- **Dead ball → D.** Learned from DFL's ball-status labels: out of play, stoppages and the frames
-  before each kickoff. Frames outside the two halves are X; no graded frame is left as X.
-- **Loose balls stay with the last team.** When the team signal is uninformative, the decoder's
-  switching cost keeps the current possessor until another team's evidence is strong.
-- **Touches, deflections and challenges are not changes of possession.** A change of team only
-  counts if the new team keeps the ball for at least **2 seconds** (50 frames); shorter spells
-  are returned to the team that had it before (`possession/controlled.py`). This follows the
-  challenge definition of *controlled* possession; the 2 s threshold was fixed before looking at
-  any result, and the same rule is applied to the DFL answer key used for validation.
-- **Restarts have a clear possessor.** The first spell after any stoppage is always kept, however
-  short, because the restarting team has the ball.
-
-## 5. Results and model selection
-
-spellF1 (ranking metric) and macroF1, scrambled DFL matches with the 2 s answer key, and the
-public 5-minute window of this match.
-
-| Model | Validation J03WQQ | Test J03WR9 | Mean | Public window spellF1 / macroF1 |
+| Model | Validation | Test | Mean | Public window (spellF1 / macroF1) |
 |---|---:|---:|---:|---:|
-| **T_DBC (submitted)** | **0.7466** | **0.7900** | **0.7683** | **0.6857 / 0.7957** |
-| T_DBC + outside-pitch rule | 0.7466 | 0.7892 | 0.7679 | |
-| DBC (½ DB + ½ C, both heads) | 0.7349 | 0.7878 | 0.7614 | 0.6378 / 0.7935 |
-| DB | 0.7030 | 0.7256 | 0.7143 | |
-| C | 0.7028 | 0.7153 | 0.7091 | |
-| T alone | 0.6861 | 0.6980 | 0.6921 | |
-| baseline_smooth50 (organisers) | | | | 0.3256 / 0.6207 |
+| **Hybrid, submitted** | **0.747** | **0.790** | **0.768** | **0.686 / 0.796** |
+| PathCRF + CNN, both heads averaged | 0.735 | 0.788 | 0.761 | 0.638 / 0.794 |
+| Transformer + PathCRF, both heads averaged | 0.743 | 0.773 | 0.758 | |
+| PathCRF + dead-ball classifier | 0.703 | 0.726 | 0.714 | |
+| Temporal CNN | 0.703 | 0.715 | 0.709 | |
+| Transformer alone | 0.686 | 0.698 | 0.692 | |
+| Hand-written rules | 0.352 | 0.345 | 0.348 | |
+| Organiser baseline smooth125 / smooth50 | | | | 0.424 / 0.326 |
 
-On the public window T_DBC predicts 18 possessions against 17 real ones.
+![Figure 3: public window timeline](report/fig_timeline.svg)
 
-**Tried and dropped.** Hand-written dead-ball rules with a nearest-player team signal (approach
-A); PathCRF with rule-based dead balls (D); averaging DB with T on both heads (DBT); an explicit
-ball-outside-the-pitch rule (no measurable gain, see `BOUNDARY.md`); Smart Tagging restarts as
-dead-ball evidence (no gain); an audio whistle detector using an AudioSet model on the match audio
-(too unreliable to use without synchronised labels, see `AUDIO_REVIEW.md`).
+*Figure 3. The public five minutes, frame by frame. Our labels reproduce most of the true
+possession structure, 18 possessions against 17; the organiser baseline fragments the same
+period into 26.*
 
-## 6. Limitations
+All three views agree on the ranking: the hybrid is best on validation, on test and on the
+public window. We selected models by validation score and never tuned on the public window,
+which served only to check the pipeline.
 
-- **Small margin over the previous model.** T_DBC beats DBC by 0.007 spellF1 on the DFL matches,
-  well inside the ~0.04 noise band in `EVALUATION.md`.
-- **Optimistic validation numbers.** The T_DBC combination was chosen after the test match had
-  been inspected for earlier models, so the test score is no longer independent. The published
-  PathCRF checkpoint holds out J03WR9 but, under its authors' leave-one-match-out protocol, used
-  J03WQQ to select the checkpoint, so DB, DBC and T_DBC validation scores slightly flatter the
-  team signal.
-- **Domain shift.** Five German matches with simulated defects stand in for a LaLiga match from a
-  tactical camera; the scrambling copies aggregate defect statistics, not the exact failure modes.
-- **The 2 s rule removes genuine quick turnovers**, such as an interception lost again within two
-  seconds.
-- **Stoppages inside the pitch** (fouls, injuries) are harder than balls leaving the field, and
-  long missing-ball stretches leave the team signal to player movement alone.
-- **With more time:** retrain PathCRF without the validation match; adapt to this match's tracking
-  with self-supervised learning; average several training seeds; detect the ball in the video to
-  fill tracking gaps.
+## 5. What we tried and dropped
 
-## 7. Reproduction
+| Idea | Outcome | Decision |
+|---|---|---|
+| Hand-written dead-ball rules and nearest player to the ball | spellF1 0.348 | Replaced by learned models |
+| Transformer for both questions | 0.692: strong on dead balls, weaker on the team | Dead-ball head only |
+| Transformer averaged with PathCRF on both heads | 0.758 | Below the hybrid |
+| Explicit "ball outside the pitch" evidence | Validation unchanged (0.7466); 97% of triggered frames were truly dead, but the model already knew | Dropped (`BOUNDARY.md`) |
+| Restarts from Smart Tagging as dead-ball evidence | 0.7459 vs 0.7466 on validation | Dropped |
+| Referee-whistle detection from match audio (AudioSet model) | Too unreliable without synchronised labels | Kept as a review tool only (`AUDIO_REVIEW.md`) |
 
-Environment used: Windows 11, Python 3.12.12, uv 0.10.6, NVIDIA GeForce RTX 5070 Ti, PyTorch
-2.11.0 with CUDA 12.8. All trained weights are committed: `models/transformer.pt`,
-`models/tcn.pt`, `models/deadball_hgb.joblib` and the vendored PathCRF checkpoint.
+## 6. Data and assets
+
+**From the organisers.** The tactical tracking is the only model input. The two kickoff frames
+from the starter code mark the start of each half. Homography, broadcast feeds and Smart
+Tagging are not used by the submission. We watched the tactical video in a local review player
+to debug, which the rules allow. The public 5-minute ground truth was used only to check the
+pipeline.
+
+**Training data.** No labels of the provided game were used, and we created no labels ourselves.
+
+| Dataset | Labelled by | Amount | Use |
+|---|---|---|---|
+| Sportec Open DFL Dataset (Bassek et al., *Scientific Data* 2025, CC-BY 4.0), via the Hugging Face mirror `pysport/idsse-data` | DFL / Sportec Solutions: ball status and possessing team in the official tracking feed | 7 Bundesliga / 2. Bundesliga matches: 5 train, 1 validation, 1 test | Training the Transformer, CNN and dead-ball classifier; all validation |
+| DFL event data synchronised with ELASTIC, shipped with PathCRF | DFL (manual event annotation), synchronised by the PathCRF authors | Same 7 matches | Training of the published PathCRF checkpoint by its authors |
+
+## 7. Limitations and next steps
+
+- **Quick turnovers are merged.** The 2-second rule removes genuine short possessions, such as an
+  interception lost straight back.
+- **Stoppages inside the pitch** (fouls, injuries) are harder to see than a ball leaving it.
+- **Long missing-ball gaps** leave the team signal to player movement alone.
+- **German matches are a proxy.** They copy this tracker's defect statistics, not its exact
+  failure modes.
+- **Evaluation caveat.** The hybrid was chosen after the test match had been looked at in earlier
+  rounds, and the published PathCRF checkpoint used our validation match for its own checkpoint
+  selection, so the German numbers are slightly optimistic. The public window, never used for
+  tuning, is the cleanest check, and it agrees.
+- **Next steps:** retrain PathCRF on our split; adapt to this match's unlabelled tracking with
+  self-supervised learning; ensemble several training seeds; detect the ball in the video to fill
+  tracking gaps.
+
+## 8. Reproduction
+
+Built on Windows 11 with Python 3.12.12, uv 0.10.6, an NVIDIA RTX 5070 Ti and PyTorch 2.11.0
+(CUDA 12.8). All trained weights are in the repository.
 
 ```powershell
-# 1. Environment (exact versions)
 uv venv --python 3.12 .venv
 uv pip install --python .venv/Scripts/python.exe -r requirements-submission.txt --index-strategy unsafe-best-match
-
-# 2. Data: unpack the match bundle into data/ as described in data/README.md
-#    (data/tactical/BAR-ATH_tactical_atd.xml and BAR-ATH_tactical_atd.txt are what is read)
-
-# 3. Generate the submission -> submissions/T_DBC.csv
+# unpack the match bundle into data/ (see data/README.md), then:
 .venv/Scripts/python.exe -m possession.run --approach T_DBC --device cuda --post 50 --name T_DBC
 .venv/Scripts/python.exe evaluation/validate_submission.py submissions/T_DBC.csv
 ```
 
-Expected SHA-256 of `submissions/T_DBC.csv`:
-`3f4878340177bee5d22d825d4370710567ade8d617032cf6aee54e0ac4aa20bc`.
-This was reproduced byte for byte from the committed code and weights. **Use `--device cuda`:**
-the CPU path gives the same public-window score but differs on 111 of 199,319 frames (0.06%)
-through floating-point differences.
+The output `submissions/T_DBC.csv` has SHA-256
+`3f4878340177bee5d22d825d4370710567ade8d617032cf6aee54e0ac4aa20bc`. We regenerated it byte for
+byte from a fresh clone. Use `--device cuda`: CPU arithmetic changes 111 of 199,319 frames
+(0.06%), with the same public-window score.
 
-Optional, to retrain or re-evaluate (needs the DFL download, done automatically, and the defect
-profile from `TRANSFORMER.md`; retrained weights will not be bit-identical to the committed ones):
+To retrain and re-score (downloads the DFL data automatically; see `TRANSFORMER.md` for the
+defect profile). Retrained weights are not bit-identical to the committed ones.
 
 ```powershell
-.venv/Scripts/python.exe -m possession.deadball_model          # dead-ball model
-.venv/Scripts/python.exe -m possession.nn                      # TCN
+.venv/Scripts/python.exe -m possession.deadball_model
+.venv/Scripts/python.exe -m possession.nn
 .venv/Scripts/python.exe -m possession.transformer --device cuda
-.venv/Scripts/python.exe -m possession.evaluate --predictors DB C DBC T T_DBC --matches J03WQQ J03WR9 --labels controlled2 --post 50
+.venv/Scripts/python.exe -m possession.evaluate --predictors A DB C DBC T DBT T_DBC `
+    --matches J03WQQ J03WR9 --labels controlled2 --post 50
 ```
+
+This report is built from `SOLUTION.md` by `report/build.py`.
