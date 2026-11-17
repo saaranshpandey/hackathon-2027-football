@@ -1,6 +1,7 @@
 # Ball possession from tracking: the T_DBC hybrid
 
-Technical document for More than a Hack 2027, Phase 1. Submission file: `submissions/T_DBC.csv`,
+Technical document for More than a Hack 2027, Phase 1. Code:
+<https://github.com/saaranshpandey/hackathon-2027-football> (branch `main`). The submission file is
 produced by `python -m possession.run --approach T_DBC --device cuda --post 50`.
 
 ## 1. Approach
