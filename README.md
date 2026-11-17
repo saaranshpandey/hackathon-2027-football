@@ -1,5 +1,9 @@
 # More than a Hack 2027 — Phase 1: Ball Possession
 
+> **Our submission:** see [SOLUTION.md](SOLUTION.md) for the approach and the exact command that
+> regenerates `submissions/T_DBC.csv`. The rest of this README is the organisers' challenge
+> description.
+
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)
 and the [Mobile World Capital Barcelona](https://www.mwcbarcelona.com)**, at the Talent Arena in Barcelona.
 

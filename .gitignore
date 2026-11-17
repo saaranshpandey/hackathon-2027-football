@@ -60,7 +60,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .uv-cache/
-models/transformer*.pt
+# models/transformer.pt is committed: the submission cannot be regenerated without it.
+models/transformer-*.pt
 venv/
 env/
 .DS_Store
