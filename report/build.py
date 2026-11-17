@@ -26,54 +26,18 @@ EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 FPS = 25
 
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
-OURS, OTHER, BASELINE = "#2a78d6", "#b5b4ae", "#d9d8d3"
 LABEL_COLOURS = {"H": "#2a78d6", "A": "#eb6834", "D": "#1baf7a"}
 LABEL_NAMES = {"H": "Barcelona in possession", "A": "Athletic in possession", "D": "Ball dead"}
 
-# spellF1: possession.evaluate (DFL, controlled2, post 50, mean of J03WQQ and J03WR9) and
-# evaluation/run_evaluation.py (public window).
-DFL = [("Hybrid (submitted)", 0.7683), ("PathCRF + CNN", 0.7614), ("Transformer + PathCRF", 0.7577),
-       ("PathCRF + dead-ball model", 0.7143), ("Temporal CNN", 0.7091), ("Transformer alone", 0.6921),
-       ("Hand-written rules", 0.3483)]
-PUBLIC = [("Hybrid (submitted)", 0.6857), ("PathCRF + CNN", 0.6378),
-          ("Organiser smooth125", 0.4242), ("Organiser smooth50", 0.3256)]
 # Possession counts in the public window, from evaluation/run_evaluation.py.
 LANES = [("Ground truth", "evaluation/gt/BAR-ATH_possession_gt_public.csv", 17),
-         ("Our submission", "submissions/T_DBC.csv", 18),
-         ("Organiser smooth50", "evaluation/results/baseline_smooth50.csv", 26)]
+         ("Our submission", "submissions/T_DBC.csv", 18)]
 
 plt.rcParams.update({
     "svg.fonttype": "none", "font.family": ["Segoe UI", "DejaVu Sans"], "font.size": 8.5,
     "text.color": INK, "axes.edgecolor": GRID, "axes.labelcolor": INK2, "xtick.color": INK2,
     "ytick.color": INK, "axes.spines.top": False, "axes.spines.right": False, "axes.spines.left": False,
 })
-
-
-def bars(ax, rows, title, subtitle):
-    names, values = [r[0] for r in rows][::-1], [r[1] for r in rows][::-1]
-    colours = [OURS if n.startswith("Hybrid") else BASELINE if n.startswith("Organiser") else OTHER for n in names]
-    ax.barh(names, values, color=colours, height=0.62)
-    ax.set_ylim(len(rows) - len(DFL) - 0.5, len(rows) - 0.5)  # same bar size in both panels, top-aligned
-    for y, v in enumerate(values):
-        ax.text(v + 0.015, y, f"{v:.3f}", va="center", fontsize=8.5, color=INK)
-    ax.set_xlim(0, 0.95)
-    ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8])
-    ax.xaxis.grid(True, color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.tick_params(length=0)
-    for label in ax.get_yticklabels():
-        if label.get_text().startswith("Hybrid"):
-            label.set_fontweight("bold")
-    ax.set_title(title, loc="left", fontsize=9.5, fontweight="bold", pad=16)
-    ax.text(0, 1.035, subtitle, transform=ax.transAxes, fontsize=8, color=INK2)
-
-
-def results_figure(path):
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.75), gridspec_kw={"width_ratios": [7, 4.6]}, layout="constrained")
-    bars(axes[0], DFL, "Two held-out German matches", "mean spellF1, validation + test")
-    bars(axes[1], PUBLIC, "This match, public window", "spellF1, five minutes")
-    fig.savefig(path, transparent=False, facecolor="white")
-    plt.close(fig)
 
 
 def runs(labels):
@@ -88,7 +52,7 @@ def runs(labels):
 def timeline_figure(path):
     truth = pd.read_csv(ROOT / LANES[0][1])
     window = (truth.label != "X").to_numpy()
-    fig, ax = plt.subplots(figsize=(7.0, 2.05), layout="constrained")
+    fig, ax = plt.subplots(figsize=(7.0, 1.6), layout="constrained")
     for row, (name, csv, possessions) in enumerate(LANES):
         y = len(LANES) - 1 - row
         csv = ROOT / csv
@@ -151,7 +115,6 @@ def build_html(path):
 
 
 def main():
-    results_figure(HERE / "fig_results.svg")
     timeline_figure(HERE / "fig_timeline.svg")
     html = ROOT / "out" / "report" / f"{TEAM}.html"
     html.parent.mkdir(parents=True, exist_ok=True)
