@@ -1,72 +1,70 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 340" width="960" height="340" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 340" width="960" height="340" font-family="Times New Roman, Times, serif">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#52514e"/>
+      <path d="M0,0 L10,5 L0,10 z" fill="#3a3936"/>
     </marker>
     <style>
-      .box{fill:#ffffff;stroke:#c9c8c2;stroke-width:1.5}
-      .model{fill:#f2f6fc;stroke:#9ec5f4;stroke-width:1.5}
-      .out{fill:#2a78d6;stroke:#2a78d6;stroke-width:1.5}
-      .t{font-size:15px;font-weight:600;fill:#0b0b0b}
-      .s{font-size:13px;fill:#52514e}
-      .w{font-size:15px;font-weight:600;fill:#ffffff}
-      .ws{font-size:13px;fill:#e6f0fc}
-      .edge{fill:none;stroke:#52514e;stroke-width:1.6;marker-end:url(#arrow)}
-      .lab{font-size:12px;fill:#52514e;font-style:italic}
+      .box{fill:#ffffff;stroke:#9b9a94;stroke-width:1.6}
+      .model{fill:#eef4fc;stroke:#5598e7;stroke-width:1.6}
+      .out{fill:#2a78d6;stroke:#2a78d6;stroke-width:1.6}
+      .t{font-size:21px;font-weight:700;fill:#0b0b0b}
+      .s{font-size:18px;fill:#3a3936}
+      .m{font-size:18px;font-style:italic;fill:#3a3936}
+      .w{font-size:21px;font-weight:700;fill:#ffffff}
+      .ws{font-size:18px;fill:#e6f0fc}
+      .edge{fill:none;stroke:#3a3936;stroke-width:1.7;marker-end:url(#arrow)}
     </style>
   </defs>
   <rect width="960" height="340" fill="#ffffff"/>
 
   <!-- input -->
-  <rect class="box" x="10" y="140" width="170" height="96" rx="8"/>
-  <text class="t" x="95" y="168" text-anchor="middle">Tactical tracking</text>
-  <text class="s" x="95" y="188" text-anchor="middle">ATD, 25 fps</text>
-  <text class="s" x="95" y="206" text-anchor="middle">46 anonymous track slots</text>
-  <text class="s" x="95" y="224" text-anchor="middle">ball missing 41% of play</text>
+  <rect class="box" x="10" y="130" width="170" height="112" rx="6"/>
+  <text class="t" x="95" y="160" text-anchor="middle">Tracking</text>
+  <text class="s" x="95" y="184" text-anchor="middle">25 fps</text>
+  <text class="s" x="95" y="206" text-anchor="middle">46 anonymous slots</text>
+  <text class="s" x="95" y="228" text-anchor="middle">ball missing 41%</text>
 
   <!-- preparation -->
-  <rect class="box" x="220" y="70" width="190" height="70" rx="8"/>
-  <text class="t" x="315" y="99" text-anchor="middle">Feature extraction</text>
-  <text class="s" x="315" y="119" text-anchor="middle">44 features per frame, 5 fps</text>
-  <rect class="box" x="220" y="250" width="190" height="70" rx="8"/>
-  <text class="t" x="315" y="279" text-anchor="middle">Track stitching</text>
-  <text class="s" x="315" y="299" text-anchor="middle">11 + 11 continuous players</text>
-  <path class="edge" d="M180,188 H200 V105 H218"/>
-  <path class="edge" d="M200,188 V285 H218"/>
+  <rect class="box" x="215" y="62" width="190" height="72" rx="6"/>
+  <text class="t" x="310" y="93" text-anchor="middle">Features</text>
+  <text class="s" x="310" y="119" text-anchor="middle">44 per frame, 5 fps</text>
+  <rect class="box" x="215" y="246" width="190" height="72" rx="6"/>
+  <text class="t" x="310" y="277" text-anchor="middle">Track stitching</text>
+  <text class="s" x="310" y="303" text-anchor="middle">11 + 11 players</text>
+  <path class="edge" d="M180,186 H198 V98 H213"/>
+  <path class="edge" d="M198,186 V282 H213"/>
 
-  <!-- models -->
-  <rect class="model" x="450" y="20" width="200" height="64" rx="8"/>
-  <text class="t" x="550" y="47" text-anchor="middle">Dead-ball Transformer</text>
-  <text class="s" x="550" y="67" text-anchor="middle">P(ball dead)</text>
-  <rect class="model" x="450" y="118" width="200" height="64" rx="8"/>
-  <text class="t" x="550" y="145" text-anchor="middle">Temporal CNN</text>
-  <text class="s" x="550" y="165" text-anchor="middle">P(Barcelona has it | live)</text>
-  <rect class="model" x="450" y="253" width="200" height="64" rx="8"/>
-  <text class="t" x="550" y="280" text-anchor="middle">PathCRF (pretrained)</text>
-  <text class="s" x="550" y="300" text-anchor="middle">P(Barcelona has it | live)</text>
-  <path class="edge" d="M410,105 H430 V52 H448"/>
-  <path class="edge" d="M430,105 V150 H448"/>
-  <path class="edge" d="M410,285 H448"/>
+  <!-- networks -->
+  <rect class="model" x="445" y="14" width="200" height="68" rx="6"/>
+  <text class="t" x="545" y="43" text-anchor="middle">Transformer</text>
+  <text class="m" x="545" y="69" text-anchor="middle">p(dead)</text>
+  <rect class="model" x="445" y="112" width="200" height="68" rx="6"/>
+  <text class="t" x="545" y="141" text-anchor="middle">Temporal CNN</text>
+  <text class="m" x="545" y="167" text-anchor="middle">p(home | live)</text>
+  <rect class="model" x="445" y="248" width="200" height="68" rx="6"/>
+  <text class="t" x="545" y="277" text-anchor="middle">PathCRF</text>
+  <text class="m" x="545" y="303" text-anchor="middle">p(home | live)</text>
+  <path class="edge" d="M405,98 H425 V48 H443"/>
+  <path class="edge" d="M425,98 V146 H443"/>
+  <path class="edge" d="M405,282 H443"/>
 
   <!-- fusion -->
-  <circle class="box" cx="700" cy="218" r="23"/>
-  <text class="s" x="700" y="222" text-anchor="middle" font-weight="600">mean</text>
-  <path class="edge" d="M650,150 H700 V193"/>
-  <path class="edge" d="M650,285 H700 V243"/>
+  <circle class="box" cx="700" cy="214" r="27"/>
+  <text class="s" x="700" y="220" text-anchor="middle" font-weight="700">mean</text>
+  <path class="edge" d="M645,146 H700 V185"/>
+  <path class="edge" d="M645,282 H700 V243"/>
 
   <!-- decoding -->
-  <rect class="box" x="760" y="110" width="190" height="64" rx="8"/>
-  <text class="t" x="855" y="137" text-anchor="middle">Viterbi decoder</text>
-  <text class="s" x="855" y="157" text-anchor="middle">H · A · D with switch costs</text>
-  <rect class="box" x="760" y="200" width="190" height="52" rx="8"/>
-  <text class="t" x="855" y="231" text-anchor="middle">2-second control rule</text>
-  <rect class="out" x="760" y="278" width="190" height="56" rx="8"/>
-  <text class="w" x="855" y="302" text-anchor="middle">Possession labels</text>
-  <text class="ws" x="855" y="321" text-anchor="middle">every frame, 25 fps</text>
-  <path class="edge" d="M650,52 H855 V108"/>
-  <text class="lab" x="700" y="45">dead-ball head</text>
-  <path class="edge" d="M723,218 H740 V142 H758"/>
-  <text class="lab" x="670" y="222" text-anchor="end">possession head</text>
-  <path class="edge" d="M855,174 V198"/>
-  <path class="edge" d="M855,252 V276"/>
+  <rect class="box" x="755" y="104" width="195" height="68" rx="6"/>
+  <text class="t" x="852" y="133" text-anchor="middle">Viterbi decoder</text>
+  <text class="s" x="852" y="159" text-anchor="middle">states H, A, D</text>
+  <rect class="box" x="755" y="198" width="195" height="54" rx="6"/>
+  <text class="t" x="852" y="232" text-anchor="middle">2 s control rule</text>
+  <rect class="out" x="755" y="278" width="195" height="58" rx="6"/>
+  <text class="w" x="852" y="303" text-anchor="middle">Labels</text>
+  <text class="ws" x="852" y="326" text-anchor="middle">every frame, 25 fps</text>
+  <path class="edge" d="M645,48 H852 V102"/>
+  <path class="edge" d="M727,214 H740 V138 H753"/>
+  <path class="edge" d="M852,172 V196"/>
+  <path class="edge" d="M852,252 V276"/>
 </svg>
